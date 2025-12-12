@@ -57,3 +57,14 @@ export interface GameState {
   cars: CarState[];
   tick: number;
 }
+
+/**
+ * Input actions for controlling a car.
+ */
+export interface InputState {
+  accelerate: boolean;
+  brake: boolean;
+  turnLeft: boolean;
+  turnRight: boolean;
+  nitro: boolean;
+}
