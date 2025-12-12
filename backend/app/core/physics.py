@@ -2,7 +2,7 @@
 Physics simulation for CodeRally.
 
 This module implements the car physics model with realistic acceleration,
-braking, turning, drag, and momentum.
+braking, turning, drag, momentum, and drift mechanics.
 """
 
 import math
@@ -66,11 +66,15 @@ class CarState:
         velocity: Velocity vector (units/second)
         heading: Direction car is facing (radians, 0 = right, pi/2 = up)
         angular_velocity: Rate of rotation (radians/second)
+        is_drifting: Whether the car is currently in a drift
+        drift_angle: Angle between heading and velocity direction (radians)
     """
     position: Vector2
     velocity: Vector2
     heading: float
     angular_velocity: float = 0.0
+    is_drifting: bool = False
+    drift_angle: float = 0.0
 
     def get_speed(self) -> float:
         """Get current speed (magnitude of velocity)."""
@@ -79,6 +83,10 @@ class CarState:
     def get_heading_vector(self) -> Vector2:
         """Get unit vector in the direction the car is facing."""
         return Vector2(math.cos(self.heading), math.sin(self.heading))
+
+    def get_lateral_vector(self) -> Vector2:
+        """Get unit vector perpendicular to heading (right side of car)."""
+        return Vector2(math.sin(self.heading), -math.cos(self.heading))
 
 
 class CarPhysics:
@@ -118,7 +126,9 @@ class CarPhysics:
             position=state.position,
             velocity=new_velocity,
             heading=state.heading,
-            angular_velocity=state.angular_velocity
+            angular_velocity=state.angular_velocity,
+            is_drifting=state.is_drifting,
+            drift_angle=state.drift_angle
         )
 
     def apply_braking(self, state: CarState, dt: float) -> CarState:
@@ -149,7 +159,9 @@ class CarPhysics:
             position=state.position,
             velocity=new_velocity,
             heading=state.heading,
-            angular_velocity=state.angular_velocity
+            angular_velocity=state.angular_velocity,
+            is_drifting=state.is_drifting,
+            drift_angle=state.drift_angle
         )
 
     def apply_turning(self, state: CarState, turn_direction: float, dt: float) -> CarState:
@@ -185,7 +197,9 @@ class CarPhysics:
             position=state.position,
             velocity=state.velocity,
             heading=new_heading,
-            angular_velocity=turn_rate
+            angular_velocity=turn_rate,
+            is_drifting=state.is_drifting,
+            drift_angle=state.drift_angle
         )
 
     def apply_drag(self, state: CarState, dt: float) -> CarState:
@@ -224,7 +238,104 @@ class CarPhysics:
             position=state.position,
             velocity=new_velocity,
             heading=state.heading,
-            angular_velocity=state.angular_velocity
+            angular_velocity=state.angular_velocity,
+            is_drifting=state.is_drifting,
+            drift_angle=state.drift_angle
+        )
+
+    def calculate_drift_state(self, state: CarState, grip_coefficient: float = 1.0) -> Tuple[bool, float]:
+        """
+        Calculate whether the car is drifting and the drift angle.
+
+        Args:
+            state: Current car state
+            grip_coefficient: Surface grip coefficient (0-1)
+
+        Returns:
+            Tuple of (is_drifting, drift_angle)
+        """
+        if state.get_speed() < self.physics.MIN_TURN_SPEED:
+            return (False, 0.0)
+
+        # Get velocity components
+        heading_vec = state.get_heading_vector()
+        lateral_vec = state.get_lateral_vector()
+
+        # Calculate lateral velocity (sideways movement)
+        lateral_velocity = state.velocity.dot(lateral_vec)
+        forward_velocity = state.velocity.dot(heading_vec)
+
+        # Calculate slip angle (angle between heading and velocity)
+        if abs(forward_velocity) > 0.1:
+            drift_angle = math.atan2(lateral_velocity, forward_velocity)
+        else:
+            drift_angle = 0.0
+
+        # Check if exceeding grip threshold
+        lateral_speed = abs(lateral_velocity)
+        max_lateral_grip = grip_coefficient * self.physics.DRIFT_THRESHOLD * state.get_speed()
+
+        is_drifting = lateral_speed > max_lateral_grip
+
+        return (is_drifting, drift_angle)
+
+    def apply_grip(
+        self,
+        state: CarState,
+        grip_coefficient: float = 1.0,
+        dt: float = 1.0 / 60.0
+    ) -> CarState:
+        """
+        Apply grip forces to align velocity with heading.
+
+        When not drifting, grip strongly aligns velocity with heading.
+        When drifting, grip is reduced, allowing the car to slide.
+
+        Args:
+            state: Current car state
+            grip_coefficient: Surface grip coefficient (0-1, default asphalt = 1.0)
+            dt: Time delta in seconds
+
+        Returns:
+            New car state with grip applied
+        """
+        if state.get_speed() < 0.1:
+            return state
+
+        # Determine drift state
+        is_drifting, drift_angle = self.calculate_drift_state(state, grip_coefficient)
+
+        # Get velocity components
+        heading_vec = state.get_heading_vector()
+        lateral_vec = state.get_lateral_vector()
+
+        forward_velocity = state.velocity.dot(heading_vec)
+        lateral_velocity = state.velocity.dot(lateral_vec)
+
+        # Apply grip to reduce lateral velocity
+        if is_drifting:
+            # Reduced grip when drifting
+            grip_strength = grip_coefficient * 0.3
+        else:
+            # Full grip when not drifting
+            grip_strength = grip_coefficient
+
+        # Calculate grip force to reduce lateral slip
+        lateral_correction = -lateral_velocity * grip_strength * self.physics.DRIFT_RECOVERY_RATE * dt
+
+        # Apply correction
+        new_lateral_velocity = lateral_velocity + lateral_correction
+
+        # Reconstruct velocity vector
+        new_velocity = (heading_vec * forward_velocity) + (lateral_vec * new_lateral_velocity)
+
+        return CarState(
+            position=state.position,
+            velocity=new_velocity,
+            heading=state.heading,
+            angular_velocity=state.angular_velocity,
+            is_drifting=is_drifting,
+            drift_angle=drift_angle
         )
 
     def update_position(self, state: CarState, dt: float) -> CarState:
@@ -244,7 +355,9 @@ class CarPhysics:
             position=new_position,
             velocity=state.velocity,
             heading=state.heading,
-            angular_velocity=state.angular_velocity
+            angular_velocity=state.angular_velocity,
+            is_drifting=state.is_drifting,
+            drift_angle=state.drift_angle
         )
 
     def simulate_step(
@@ -253,7 +366,8 @@ class CarPhysics:
         accelerating: bool,
         braking: bool,
         turn_direction: float,
-        dt: float
+        dt: float,
+        grip_coefficient: float = 1.0
     ) -> CarState:
         """
         Simulate one physics step with the given inputs.
@@ -264,6 +378,7 @@ class CarPhysics:
             braking: True if brake input is active
             turn_direction: -1 for left, +1 for right, 0 for straight
             dt: Time delta in seconds
+            grip_coefficient: Surface grip coefficient (0-1, default asphalt = 1.0)
 
         Returns:
             New car state after simulation step
@@ -279,6 +394,9 @@ class CarPhysics:
 
         if turn_direction != 0:
             new_state = self.apply_turning(new_state, turn_direction, dt)
+
+        # Apply grip forces (handles drift mechanics)
+        new_state = self.apply_grip(new_state, grip_coefficient, dt)
 
         # Always apply drag
         new_state = self.apply_drag(new_state, dt)
