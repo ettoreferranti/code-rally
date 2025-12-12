@@ -66,6 +66,44 @@ code-rally/
    - Write tests for new functionality
    - Update documentation if APIs change
 
+### Issue Completion Workflow
+
+**IMPORTANT**: When you complete an issue, follow this workflow:
+
+1. **Ask for Approval**: Present the completed work and ask the user to verify/approve
+2. **Update Documentation**: Automatically update any relevant documentation:
+   - Update `docs/` files if architecture or APIs changed
+   - Update README.md if setup instructions changed
+   - Update bot-api.md if bot interface changed
+3. **Update Tests**: Automatically update or add tests as necessary:
+   - Add unit tests for new functions/methods
+   - Add integration tests for new endpoints
+   - Update existing tests if behavior changed
+4. **Commit and Push**: After approval, automatically commit and push:
+   - Use conventional commit format: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
+   - Reference issue number: `feat: implement feature (#123)`
+   - Include descriptive commit message explaining what was done
+   - Add Claude Code attribution footer
+5. **Close Issue**: Automatically close the GitHub issue with a comment:
+   - Summarize what was implemented
+   - List acceptance criteria that were met
+   - Include any setup/usage instructions if needed
+
+**Example Commit Message**:
+```
+feat: implement React frontend project structure (#96)
+
+- Set up React 19 + TypeScript with Vite 7
+- Configure Tailwind CSS v3 for styling
+- Add React Router with Layout component
+- Create project structure (components, game, editor, services)
+- Implement placeholder pages (Home, Race, Editor)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
 ### Fetching Issue Details
 
 Use the GitHub CLI to get issue details:
