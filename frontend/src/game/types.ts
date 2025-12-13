@@ -54,6 +54,7 @@ export interface CarState {
   is_drifting: boolean;
   drift_angle: number;
   throttle: number;  // Current throttle level (0-1) for smooth acceleration
+  is_off_track: boolean;  // Whether car is currently off-track
 }
 
 export interface RaceInfo {

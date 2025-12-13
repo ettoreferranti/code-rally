@@ -6,7 +6,7 @@ export { useKeyboardInput } from './useKeyboardInput';
 export { useGameLoop } from './useGameLoop';
 export type { GameLoopCallbacks } from './useGameLoop';
 export { CarPhysics, Vector2Utils } from './physics';
-export { getSurfaceAtPosition } from './trackUtils';
+export { getSurfaceAtPosition, isOnTrack } from './trackUtils';
 export { updateCheckpointProgress } from './checkpointUtils';
 
 // Export types and enums

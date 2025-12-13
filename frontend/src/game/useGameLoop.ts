@@ -84,7 +84,7 @@ export function useGameLoop(
             nitro: false
           };
 
-          return physics.update(car, carInput, surface, PHYSICS_DT);
+          return physics.update(car, carInput, surface, currentGameState.track, PHYSICS_DT);
         });
 
         // Create new game state with updated cars

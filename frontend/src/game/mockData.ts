@@ -172,7 +172,8 @@ export function createMockGameState(): GameState {
     angular_velocity: 0,
     is_drifting: false,
     drift_angle: 0,
-    throttle: 0
+    throttle: 0,
+    is_off_track: false
   };
 
   return {

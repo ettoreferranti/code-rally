@@ -5,8 +5,9 @@
  * drag, momentum, and drift mechanics.
  */
 
-import type { Vector2, CarState, SurfaceType, InputState } from './types';
+import type { Vector2, CarState, SurfaceType, InputState, Track } from './types';
 import { SurfaceType as SurfaceTypeEnum } from './types';
+import { isOnTrack } from './trackUtils';
 
 /**
  * Physics constants - tuned for responsive arcade-style controls.
@@ -30,7 +31,11 @@ const PHYSICS_CONFIG = {
   GRIP_GRAVEL: 0.5,
   GRIP_ICE: 0.25,
   DRIFT_THRESHOLD: 0.8,  // Higher threshold = less drifting
-  DRIFT_RECOVERY_RATE: 15.0  // Much stronger grip to kill lateral momentum faster
+  DRIFT_RECOVERY_RATE: 15.0,  // Much stronger grip to kill lateral momentum faster
+
+  // Off-track penalties
+  OFF_TRACK_SPEED_MULTIPLIER: 0.5,  // Speed reduction when off-track
+  OFF_TRACK_GRIP_MULTIPLIER: 0.3    // Grip reduction when off-track
 };
 
 /**
@@ -98,15 +103,19 @@ export class CarPhysics {
   /**
    * Update car state based on input.
    */
-  update(state: CarState, input: InputState, surface: SurfaceType, dt: number): CarState {
+  update(state: CarState, input: InputState, surface: SurfaceType, track: Track, dt: number): CarState {
     let newState = { ...state };
+
+    // Check if car is on track
+    const trackStatus = isOnTrack(track, newState.position);
+    newState.is_off_track = !trackStatus.onTrack;
 
     // Update throttle state (smoothly ramp up/down)
     newState = this.updateThrottle(newState, input.accelerate, dt);
 
     // Apply acceleration based on current throttle
     if (newState.throttle > 0) {
-      newState = this.applyAcceleration(newState, dt);
+      newState = this.applyAcceleration(newState, dt, newState.is_off_track);
     }
 
     // Apply braking
@@ -123,8 +132,11 @@ export class CarPhysics {
       newState = this.applyDrag(newState, dt);
     }
 
-    // Apply grip and drift
-    const gripCoeff = getGripCoefficient(surface);
+    // Apply grip and drift (with off-track penalty)
+    let gripCoeff = getGripCoefficient(surface);
+    if (newState.is_off_track) {
+      gripCoeff *= PHYSICS_CONFIG.OFF_TRACK_GRIP_MULTIPLIER;
+    }
     newState = this.applyGrip(newState, gripCoeff, dt);
 
     // Update position
@@ -158,7 +170,7 @@ export class CarPhysics {
     };
   }
 
-  private applyAcceleration(state: CarState, dt: number): CarState {
+  private applyAcceleration(state: CarState, dt: number, isOffTrack: boolean): CarState {
     const headingVec = {
       x: Math.cos(state.heading),
       y: Math.sin(state.heading)
@@ -171,12 +183,17 @@ export class CarPhysics {
     );
     let newVelocity = Vector2Utils.add(state.velocity, acceleration);
 
-    // Clamp to max speed
+    // Clamp to max speed (reduced if off-track)
+    let maxSpeed = PHYSICS_CONFIG.MAX_SPEED;
+    if (isOffTrack) {
+      maxSpeed *= PHYSICS_CONFIG.OFF_TRACK_SPEED_MULTIPLIER;
+    }
+
     const speed = Vector2Utils.magnitude(newVelocity);
-    if (speed > PHYSICS_CONFIG.MAX_SPEED) {
+    if (speed > maxSpeed) {
       newVelocity = Vector2Utils.multiply(
         Vector2Utils.normalize(newVelocity),
-        PHYSICS_CONFIG.MAX_SPEED
+        maxSpeed
       );
     }
 

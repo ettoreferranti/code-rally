@@ -3,13 +3,14 @@
  */
 
 import React from 'react';
-import type { RaceInfo } from '../game';
+import type { RaceInfo, CarState } from '../game';
 
 interface RaceHUDProps {
   raceInfo: RaceInfo;
+  car?: CarState;  // Optional car state for off-track indicator
 }
 
-export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo }) => {
+export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
   const elapsedTime = raceInfo.finishTime !== null
     ? raceInfo.finishTime
     : (Date.now() / 1000) - raceInfo.startTime;
@@ -92,6 +93,26 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo }) => {
           }}
         >
           STAGE COMPLETE!
+        </div>
+      )}
+
+      {/* Off-Track Warning */}
+      {car?.is_off_track && !raceInfo.isFinished && (
+        <div
+          style={{
+            marginTop: '15px',
+            padding: '10px',
+            backgroundColor: 'rgba(244, 67, 54, 0.3)',
+            borderRadius: '4px',
+            textAlign: 'center',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            color: '#F44336',
+            border: '2px solid rgba(244, 67, 54, 0.6)',
+            animation: 'pulse 1s infinite'
+          }}
+        >
+          ⚠️ OFF TRACK
         </div>
       )}
     </div>

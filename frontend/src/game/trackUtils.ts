@@ -5,6 +5,57 @@
 import type { Track, Vector2, SurfaceType } from './types';
 
 /**
+ * Check if a position is within track boundaries.
+ * Returns object with on-track status and distance from track centerline.
+ */
+export function isOnTrack(track: Track, position: Vector2): { onTrack: boolean; distance: number; trackWidth: number } {
+  let closestDistance = Infinity;
+  let closestWidth = 160; // Default width
+
+  // Check distance to each segment
+  for (const segment of track.segments) {
+    // Sample points along the segment
+    const numSamples = 10;
+    for (let i = 0; i <= numSamples; i++) {
+      const t = i / numSamples;
+
+      let point: Vector2;
+      if (segment.control1 && segment.control2) {
+        // Bezier curve
+        point = bezierPoint(
+          { x: segment.start.x, y: segment.start.y },
+          segment.control1,
+          segment.control2,
+          { x: segment.end.x, y: segment.end.y },
+          t
+        );
+      } else {
+        // Straight line
+        point = {
+          x: segment.start.x + t * (segment.end.x - segment.start.x),
+          y: segment.start.y + t * (segment.end.y - segment.start.y)
+        };
+      }
+
+      // Calculate distance from car to this point
+      const dx = position.x - point.x;
+      const dy = position.y - point.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestWidth = segment.start.width;
+      }
+    }
+  }
+
+  // Car is on track if within half the track width
+  const onTrack = closestDistance <= closestWidth / 2;
+
+  return { onTrack, distance: closestDistance, trackWidth: closestWidth };
+}
+
+/**
  * Find the closest point on the track to a given position.
  * Returns the surface type at that point.
  */

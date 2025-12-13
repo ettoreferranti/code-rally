@@ -31,7 +31,7 @@ export default function Race() {
       </p>
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
         <GameCanvas gameState={gameState} width={800} height={600} />
-        {gameState && <RaceHUD raceInfo={gameState.raceInfo} />}
+        {gameState && <RaceHUD raceInfo={gameState.raceInfo} car={gameState.cars[0]} />}
       </div>
 
       {/* Keyboard Input Display */}
