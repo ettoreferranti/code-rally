@@ -1,5 +1,5 @@
 """
-Quick visualization script to preview generated tracks.
+Quick visualization script to preview generated point-to-point rally stages.
 
 Usage:
     python visualize_track.py [seed] [difficulty]
@@ -94,17 +94,27 @@ def visualize_track(seed=None, difficulty="medium"):
     start_x, start_y = track.start_position
     ax.plot(start_x, start_y, 'g*', markersize=20, label='Start')
 
-    # Draw heading arrow
+    # Draw start heading arrow
     arrow_length = 100
     arrow_x = arrow_length * math.cos(track.start_heading)
     arrow_y = arrow_length * math.sin(track.start_heading)
     ax.arrow(start_x, start_y, arrow_x, arrow_y,
              head_width=30, head_length=40, fc='green', ec='green', alpha=0.7)
 
+    # Draw finish position (for point-to-point rally stages)
+    finish_x, finish_y = track.finish_position
+    ax.plot(finish_x, finish_y, 'r*', markersize=20, label='Finish')
+
+    # Draw finish heading arrow
+    finish_arrow_x = arrow_length * math.cos(track.finish_heading)
+    finish_arrow_y = arrow_length * math.sin(track.finish_heading)
+    ax.arrow(finish_x, finish_y, finish_arrow_x, finish_arrow_y,
+             head_width=30, head_length=40, fc='red', ec='red', alpha=0.7)
+
     # Labels and title
     ax.set_xlabel('X Position', fontsize=12)
     ax.set_ylabel('Y Position', fontsize=12)
-    title = f'Generated Track - {difficulty.capitalize()} Difficulty'
+    title = f'Rally Stage - {difficulty.capitalize()} Difficulty'
     if seed is not None:
         title += f' (seed={seed})'
     ax.set_title(title, fontsize=14, fontweight='bold')
@@ -117,7 +127,8 @@ def visualize_track(seed=None, difficulty="medium"):
         Line2D([0], [0], color=surface_colors[SurfaceType.GRAVEL], lw=4, label='Gravel'),
         Line2D([0], [0], color=surface_colors[SurfaceType.ICE], lw=4, label='Ice'),
         Line2D([0], [0], marker='o', color='w', markerfacecolor='r', markersize=8, label='Checkpoints'),
-        Line2D([0], [0], marker='*', color='w', markerfacecolor='g', markersize=12, label='Start')
+        Line2D([0], [0], marker='*', color='w', markerfacecolor='g', markersize=12, label='Start'),
+        Line2D([0], [0], marker='*', color='w', markerfacecolor='r', markersize=12, label='Finish')
     ]
     ax.legend(handles=legend_elements, loc='upper right')
 
@@ -132,13 +143,13 @@ def visualize_track(seed=None, difficulty="medium"):
     plt.tight_layout()
 
     # Save to file
-    filename = f'track_{difficulty}'
+    filename = f'rally_stage_{difficulty}'
     if seed is not None:
         filename += f'_seed{seed}'
     filename += '.png'
 
     plt.savefig(filename, dpi=150, bbox_inches='tight')
-    print(f'Track visualization saved to: {filename}')
+    print(f'Rally stage visualization saved to: {filename}')
 
     # Close the figure
     plt.close()

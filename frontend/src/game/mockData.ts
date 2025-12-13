@@ -6,127 +6,203 @@ import type { GameState } from './types';
 import { SurfaceType } from './types';
 
 /**
- * Create a simple circular track for demonstration.
+ * Create a point-to-point rally stage for demonstration.
  */
 export function createMockGameState(): GameState {
-  const radius = 300;
-  const numSegments = 8;
   const segments = [];
   const checkpoints = [];
 
-  for (let i = 0; i < numSegments; i++) {
-    const angle1 = (2 * Math.PI * i) / numSegments;
-    const angle2 = (2 * Math.PI * (i + 1)) / numSegments;
+  // Define control points for a serpentine rally stage
+  // Stage goes from top-left to bottom-right with curves
+  // More waypoints for a longer, more varied stage
+  const stagePoints = [
+    // Section 1: Fast asphalt opening (4 waypoints = 3 segments)
+    { x: -500, y: -400 },  // Start
+    { x: -300, y: -350 },
+    { x: -100, y: -300 },
+    { x: 100, y: -250 },
 
-    const x1 = radius * Math.cos(angle1);
-    const y1 = radius * Math.sin(angle1);
-    const x2 = radius * Math.cos(angle2);
-    const y2 = radius * Math.sin(angle2);
+    // Section 2: Technical wet section (3 waypoints = 2 segments)
+    { x: 300, y: -200 },
+    { x: 400, y: -50 },
 
-    // Control points for bezier curve
-    const controlDist = radius * 0.4;
-    const control1X = x1 + controlDist * Math.cos(angle1 + Math.PI / 2);
-    const control1Y = y1 + controlDist * Math.sin(angle1 + Math.PI / 2);
-    const control2X = x2 + controlDist * Math.cos(angle2 + Math.PI / 2);
-    const control2Y = y2 + controlDist * Math.sin(angle2 + Math.PI / 2);
+    // Section 3: Long gravel hairpin (4 waypoints = 3 segments)
+    { x: 350, y: 100 },
+    { x: 200, y: 200 },
+    { x: 0, y: 250 },
 
-    // Vary surface types
-    const surfaceTypes = [
-      SurfaceType.ASPHALT,
-      SurfaceType.ASPHALT,
-      SurfaceType.WET,
-      SurfaceType.ASPHALT,
-      SurfaceType.GRAVEL,
-      SurfaceType.ASPHALT,
-      SurfaceType.ASPHALT,
-      SurfaceType.ICE
-    ];
+    // Section 4: Tricky ice section (3 waypoints = 2 segments)
+    { x: -200, y: 300 },
+    { x: -350, y: 400 },
+
+    // Section 5: Final asphalt sprint (3 waypoints = 2 segments)
+    { x: -400, y: 500 },
+    { x: -300, y: 600 },   // Finish
+  ];
+
+  // Surface types for each segment - grouped into sections
+  // This creates longer stretches of consistent surface
+  const surfaceTypes = [
+    // Section 1: Asphalt opening (3 segments)
+    SurfaceType.ASPHALT,
+    SurfaceType.ASPHALT,
+    SurfaceType.ASPHALT,
+
+    // Section 2: Wet technical (2 segments)
+    SurfaceType.WET,
+    SurfaceType.WET,
+
+    // Section 3: Gravel hairpin (3 segments)
+    SurfaceType.GRAVEL,
+    SurfaceType.GRAVEL,
+    SurfaceType.GRAVEL,
+
+    // Section 4: Ice challenge (2 segments)
+    SurfaceType.ICE,
+    SurfaceType.ICE,
+
+    // Section 5: Asphalt finish (2 segments)
+    SurfaceType.ASPHALT,
+    SurfaceType.ASPHALT,
+  ];
+
+  // Define which segments should be curved vs straight
+  // 0 = straight, values > 0 = curve intensity
+  const curveIntensities = [
+    0.2,   // Section 1: Gentle opening curve
+    0,     // Straight
+    0.15,  // Gentle curve
+
+    0.4,   // Section 2: Sharp wet corner
+    0.3,   // Medium curve
+
+    0.5,   // Section 3: Tight gravel hairpin
+    0.45,  // Still tight
+    0.35,  // Easing out
+
+    0.2,   // Section 4: Gentle ice curve (dangerous if sharp!)
+    0.25,  // Medium ice curve
+
+    0,     // Section 5: Straight sprint
+    0.15,  // Gentle finish curve
+  ];
+
+  // Create segments between points
+  for (let i = 0; i < stagePoints.length - 1; i++) {
+    const p1 = stagePoints[i];
+    const p2 = stagePoints[i + 1];
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+
+    let control1 = undefined;
+    let control2 = undefined;
+
+    // Only add bezier curves if intensity > 0
+    if (curveIntensities[i] > 0) {
+      // Perpendicular offset for curve
+      const offsetX = -dy * curveIntensities[i];
+      const offsetY = dx * curveIntensities[i];
+
+      const control1X = p1.x + dx * 0.33 + offsetX;
+      const control1Y = p1.y + dy * 0.33 + offsetY;
+      const control2X = p1.x + dx * 0.66 + offsetX;
+      const control2Y = p1.y + dy * 0.66 + offsetY;
+
+      control1 = [control1X, control1Y] as [number, number];
+      control2 = [control2X, control2Y] as [number, number];
+    }
 
     segments.push({
       start: {
-        x: x1,
-        y: y1,
-        width: 80,
+        x: p1.x,
+        y: p1.y,
+        width: 160,
         surface: surfaceTypes[i]
       },
       end: {
-        x: x2,
-        y: y2,
-        width: 80,
+        x: p2.x,
+        y: p2.y,
+        width: 160,
         surface: surfaceTypes[i]
       },
-      control1: [control1X, control1Y] as [number, number],
-      control2: [control2X, control2Y] as [number, number]
+      control1,
+      control2
     });
 
-    // Add checkpoint at midpoint
-    const checkpointAngle = (angle1 + angle2) / 2;
+    // Add checkpoint at segment midpoint
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+    const angle = Math.atan2(dy, dx);
+
     checkpoints.push({
-      position: [
-        radius * Math.cos(checkpointAngle),
-        radius * Math.sin(checkpointAngle)
-      ] as [number, number],
-      angle: checkpointAngle,
-      width: 80,
+      position: [midX, midY] as [number, number],
+      angle: angle,
+      width: 160,
       index: i
     });
   }
 
-  // Create a car at the start (right side of circle, facing downward)
+  // Calculate approximate stage length
+  let totalLength = 0;
+  for (let i = 0; i < stagePoints.length - 1; i++) {
+    const p1 = stagePoints[i];
+    const p2 = stagePoints[i + 1];
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    totalLength += Math.sqrt(dx * dx + dy * dy);
+  }
+
+  const startPos = stagePoints[0];
+  const finishPos = stagePoints[stagePoints.length - 1];
+  const startHeading = Math.atan2(
+    stagePoints[1].y - stagePoints[0].y,
+    stagePoints[1].x - stagePoints[0].x
+  );
+  const finishHeading = Math.atan2(
+    finishPos.y - stagePoints[stagePoints.length - 2].y,
+    finishPos.x - stagePoints[stagePoints.length - 2].x
+  );
+
+  // Create a car at the start position
   const car = {
-    position: { x: radius, y: 0 },
+    position: { x: startPos.x, y: startPos.y },
     velocity: { x: 0, y: 0 },
-    heading: 0, // Will be updated to correct direction on first update
+    heading: startHeading,
     angular_velocity: 0,
     is_drifting: false,
-    drift_angle: 0
+    drift_angle: 0,
+    throttle: 0
   };
 
   return {
     track: {
       segments,
       checkpoints,
-      start_position: [radius, 0],
-      start_heading: Math.PI / 2,
-      total_length: 2 * Math.PI * radius
+      start_position: [startPos.x, startPos.y],
+      start_heading: startHeading,
+      finish_position: [finishPos.x, finishPos.y],
+      finish_heading: finishHeading,
+      total_length: totalLength,
+      is_looping: false
     },
     cars: [car],
-    tick: 0
+    tick: 0,
+    raceInfo: {
+      currentCheckpoint: 0,
+      totalCheckpoints: checkpoints.length,
+      isFinished: false,
+      finishTime: null,
+      startTime: Date.now() / 1000  // Current time in seconds
+    }
   };
 }
 
 /**
- * Simulate car movement in a circle for demonstration.
+ * Simple demonstration function - no longer needed as we use physics engine.
+ * Kept for backwards compatibility.
  */
 export function updateMockCar(gameState: GameState, deltaTime: number): GameState {
-  if (gameState.cars.length === 0) return gameState;
-
-  const car = gameState.cars[0];
-  const speed = 100; // units per second
-  const angularSpeed = 0.5; // radians per second
-
-  // Move car in a circle
-  // car.heading stores the angle position around the circle
-  const newHeading = car.heading + angularSpeed * deltaTime;
-  const radius = 300;
-
-  return {
-    ...gameState,
-    cars: [
-      {
-        ...car,
-        heading: newHeading,
-        position: {
-          x: radius * Math.cos(newHeading),
-          y: radius * Math.sin(newHeading)
-        },
-        velocity: {
-          x: -speed * Math.sin(newHeading),
-          y: speed * Math.cos(newHeading)
-        },
-        is_drifting: Math.abs(angularSpeed) > 0.3
-      }
-    ],
-    tick: gameState.tick + 1
-  };
+  // Physics engine handles all updates now
+  return gameState;
 }

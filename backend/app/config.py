@@ -24,17 +24,17 @@ class GameConfig:
     """Core game settings."""
     TICK_RATE: int = 60  # Physics ticks per second
     BOT_TICK_RATE: int = 20  # Bot execution rate (Hz)
-    DEFAULT_LAPS: int = 3
-    MAX_LAPS: int = 10
     MIN_CARS: int = 1
     MAX_CARS: int = 8
     COUNTDOWN_SECONDS: int = 3
-    
-    # Track generation
-    TRACK_MIN_LENGTH: int = 1000  # units
-    TRACK_MAX_LENGTH: int = 3000  # units
-    TRACK_WIDTH: int = 100  # units
-    
+
+    # Stage generation (point-to-point rally stages)
+    STAGE_MIN_LENGTH: int = 1000  # units
+    STAGE_MAX_LENGTH: int = 3000  # units
+    STAGE_WIDTH: int = 160  # units (doubled for multi-car racing)
+    CHECKPOINT_SPACING: int = 200  # Approximate distance between checkpoints
+    FINISH_GRACE_PERIOD: int = 30  # Seconds after first finisher before DNF
+
     # Surface distribution (probabilities)
     SURFACE_ASPHALT_WEIGHT: float = 0.5
     SURFACE_GRAVEL_WEIGHT: float = 0.2

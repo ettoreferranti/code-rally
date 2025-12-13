@@ -75,17 +75,23 @@ class Track:
     Complete track definition.
 
     Attributes:
-        segments: List of track segments forming a closed loop
+        segments: List of track segments (point-to-point for rally stages)
         checkpoints: Ordered list of checkpoints
         start_position: Starting position for cars
         start_heading: Starting heading for cars (radians)
+        finish_position: Finish line position
+        finish_heading: Finish line heading (radians)
         total_length: Approximate total track length
+        is_looping: Whether track loops back to start (False for rally stages)
     """
     segments: List[TrackSegment]
     checkpoints: List[Checkpoint]
     start_position: Tuple[float, float]
     start_heading: float
+    finish_position: Tuple[float, float]
+    finish_heading: float
     total_length: float = 0.0
+    is_looping: bool = False
 
 
 class TrackGenerator:
@@ -112,7 +118,7 @@ class TrackGenerator:
 
     def generate(self, difficulty: str = "medium") -> Track:
         """
-        Generate a complete racing track.
+        Generate a complete point-to-point rally stage.
 
         Args:
             difficulty: Track difficulty ("easy", "medium", "hard")
@@ -124,7 +130,7 @@ class TrackGenerator:
         control_points = self._generate_control_points(difficulty)
 
         # Create smooth segments between control points
-        segments = self._create_segments(control_points)
+        segments, curve_intensities = self._create_segments(control_points, difficulty)
 
         # Calculate total track length
         total_length = self._calculate_track_length(segments)
@@ -135,56 +141,71 @@ class TrackGenerator:
         # Determine start position and heading
         start_pos, start_heading = self._get_start_position(segments)
 
+        # Determine finish position and heading
+        finish_pos, finish_heading = self._get_finish_position(segments)
+
         return Track(
             segments=segments,
             checkpoints=checkpoints,
             start_position=start_pos,
             start_heading=start_heading,
-            total_length=total_length
+            finish_position=finish_pos,
+            finish_heading=finish_heading,
+            total_length=total_length,
+            is_looping=False
         )
 
     def _generate_control_points(self, difficulty: str) -> List[TrackPoint]:
         """
-        Generate control points that define the track shape.
+        Generate control points for a point-to-point rally stage.
 
         Args:
             difficulty: Track difficulty level
 
         Returns:
-            List of control points forming a closed loop
+            List of control points forming a winding path from start to finish
         """
         # Number of control points based on difficulty
         num_points = {
-            "easy": 6,
-            "medium": 8,
-            "hard": 12
-        }.get(difficulty, 8)
+            "easy": 8,
+            "medium": 13,  # Match frontend: 13 points = 12 segments
+            "hard": 18
+        }.get(difficulty, 13)
 
-        # Generate points in a roughly circular pattern with variation
+        # Generate points in a winding path from top-left to bottom-right
         points = []
-        base_radius = 500.0  # Base radius for the track
+
+        # Define start and end positions
+        start_x = -600.0
+        start_y = -500.0
+        end_x = -400.0
+        end_y = 700.0
+
+        # Calculate spacing
+        total_distance_x = end_x - start_x
+        total_distance_y = end_y - start_y
 
         for i in range(num_points):
-            angle = (2 * math.pi * i) / num_points
+            # Progress along the stage (0 to 1)
+            progress = i / (num_points - 1)
 
-            # Add randomness to radius and angle
-            radius_variation = random.uniform(0.7, 1.3)
-            angle_variation = random.uniform(-0.2, 0.2)
+            # Base position along the path
+            base_x = start_x + progress * total_distance_x
+            base_y = start_y + progress * total_distance_y
 
-            radius = base_radius * radius_variation
-            actual_angle = angle + angle_variation
+            # Add serpentine variation (side-to-side movement)
+            # Stronger variation in the middle, less at start/end
+            variation_strength = math.sin(progress * math.pi) * 300.0
+            serpentine_offset = math.sin(progress * math.pi * 3) * variation_strength
 
-            x = radius * math.cos(actual_angle)
-            y = radius * math.sin(actual_angle)
+            x = base_x + serpentine_offset
+            y = base_y + random.uniform(-50, 50)  # Small random variation
 
-            # Random track width
-            width = random.uniform(
-                self.config.TRACK_WIDTH * 0.8,
-                self.config.TRACK_WIDTH * 1.2
-            )
+            # Track width (slightly varied)
+            width = self.config.STAGE_WIDTH * random.uniform(0.9, 1.1)
 
-            # Random surface type (weighted toward asphalt)
-            surface = self._choose_surface()
+            # Surface will be assigned in sections later
+            surface = SurfaceType.ASPHALT  # Placeholder
 
             points.append(TrackPoint(x, y, width, surface))
 
@@ -219,55 +240,58 @@ class TrackGenerator:
         else:
             return SurfaceType.ICE
 
-    def _create_segments(self, control_points: List[TrackPoint]) -> List[TrackSegment]:
+    def _create_segments(self, control_points: List[TrackPoint], difficulty: str) -> Tuple[List[TrackSegment], List[float]]:
         """
-        Create smooth track segments between control points using bezier curves.
+        Create track segments with varied curve intensities and surface sections.
 
         Args:
             control_points: List of control points
+            difficulty: Track difficulty level
 
         Returns:
-            List of track segments forming a closed loop
+            Tuple of (segments list, curve intensities list)
         """
         segments = []
         num_points = len(control_points)
+        num_segments = num_points - 1  # Point-to-point: no loop back
 
-        for i in range(num_points):
+        # Generate curve intensities (0 = straight, higher = more curved)
+        curve_intensities = self._generate_curve_intensities(num_segments, difficulty)
+
+        # Assign surfaces in sections
+        surfaces = self._assign_surface_sections(num_segments)
+
+        for i in range(num_segments):
             start_point = control_points[i]
-            end_point = control_points[(i + 1) % num_points]
+            end_point = control_points[i + 1]
 
-            # Calculate bezier control points for smooth curves
-            # Use the adjacent points to determine curve direction
-            prev_point = control_points[(i - 1) % num_points]
-            next_next_point = control_points[(i + 2) % num_points]
-
-            # Control point 1: offset from start toward end
-            dx1 = end_point.x - prev_point.x
-            dy1 = end_point.y - prev_point.y
-            length1 = math.sqrt(dx1**2 + dy1**2)
-            if length1 > 0:
-                dx1 /= length1
-                dy1 /= length1
-
-            offset1 = 0.3 * math.sqrt((end_point.x - start_point.x)**2 + (end_point.y - start_point.y)**2)
-            control1 = (
-                start_point.x + dx1 * offset1,
-                start_point.y + dy1 * offset1
+            # Update surface from section assignment
+            start_point = TrackPoint(
+                x=start_point.x,
+                y=start_point.y,
+                width=start_point.width,
+                surface=surfaces[i]
             )
 
-            # Control point 2: offset from end toward start
-            dx2 = start_point.x - next_next_point.x
-            dy2 = start_point.y - next_next_point.y
-            length2 = math.sqrt(dx2**2 + dy2**2)
-            if length2 > 0:
-                dx2 /= length2
-                dy2 /= length2
+            dx = end_point.x - start_point.x
+            dy = end_point.y - start_point.y
 
-            offset2 = 0.3 * math.sqrt((end_point.x - start_point.x)**2 + (end_point.y - start_point.y)**2)
-            control2 = (
-                end_point.x + dx2 * offset2,
-                end_point.y + dy2 * offset2
-            )
+            control1 = None
+            control2 = None
+
+            # Only add bezier curves if intensity > 0
+            if curve_intensities[i] > 0:
+                # Perpendicular offset for curve
+                offset_x = -dy * curve_intensities[i]
+                offset_y = dx * curve_intensities[i]
+
+                control1_x = start_point.x + dx * 0.33 + offset_x
+                control1_y = start_point.y + dy * 0.33 + offset_y
+                control2_x = start_point.x + dx * 0.66 + offset_x
+                control2_y = start_point.y + dy * 0.66 + offset_y
+
+                control1 = (control1_x, control1_y)
+                control2 = (control2_x, control2_y)
 
             segments.append(TrackSegment(
                 start=start_point,
@@ -276,7 +300,73 @@ class TrackGenerator:
                 control2=control2
             ))
 
-        return segments
+        return segments, curve_intensities
+
+    def _generate_curve_intensities(self, num_segments: int, difficulty: str) -> List[float]:
+        """
+        Generate curve intensity values for each segment.
+
+        Args:
+            num_segments: Number of segments
+            difficulty: Track difficulty
+
+        Returns:
+            List of curve intensities (0 = straight, higher = sharper curve)
+        """
+        intensities = []
+
+        # Difficulty affects curve sharpness
+        max_intensity = {
+            "easy": 0.3,
+            "medium": 0.5,
+            "hard": 0.7
+        }.get(difficulty, 0.5)
+
+        for i in range(num_segments):
+            # Mix of straights and curves
+            if random.random() < 0.3:  # 30% chance of straight
+                intensities.append(0.0)
+            elif random.random() < 0.5:  # Gentle curve
+                intensities.append(random.uniform(0.1, max_intensity * 0.4))
+            elif random.random() < 0.8:  # Medium curve
+                intensities.append(random.uniform(max_intensity * 0.4, max_intensity * 0.7))
+            else:  # Sharp hairpin
+                intensities.append(random.uniform(max_intensity * 0.7, max_intensity))
+
+        return intensities
+
+    def _assign_surface_sections(self, num_segments: int) -> List[SurfaceType]:
+        """
+        Assign surfaces in sections for more realistic rally stages.
+
+        Args:
+            num_segments: Number of segments
+
+        Returns:
+            List of surface types, one per segment
+        """
+        surfaces = []
+
+        # Define sections (each section is 2-4 segments long)
+        i = 0
+        while i < num_segments:
+            # Choose surface type for this section
+            surface = self._choose_surface()
+
+            # Section length (2-4 segments, or however many remain)
+            remaining = num_segments - i
+            if remaining == 1:
+                section_length = 1
+            else:
+                section_length = random.randint(2, min(4, remaining))
+
+            # Assign this surface to all segments in the section
+            for _ in range(section_length):
+                if i < num_segments:
+                    surfaces.append(surface)
+                    i += 1
+
+        return surfaces
 
     def _calculate_track_length(self, segments: List[TrackSegment]) -> float:
         """
@@ -441,6 +531,32 @@ class TrackGenerator:
         else:
             dx = start_segment.end.x - start_segment.start.x
             dy = start_segment.end.y - start_segment.start.y
+
+        heading = math.atan2(dy, dx)
+
+        return position, heading
+
+    def _get_finish_position(self, segments: List[TrackSegment]) -> Tuple[Tuple[float, float], float]:
+        """
+        Get finish line position and heading for rally stage.
+
+        Args:
+            segments: List of track segments
+
+        Returns:
+            Tuple of (position, heading)
+        """
+        # Finish at the end of the last segment
+        finish_segment = segments[-1]
+        position = (finish_segment.end.x, finish_segment.end.y)
+
+        # Heading from second-to-last point toward finish
+        if finish_segment.control2:
+            dx = finish_segment.end.x - finish_segment.control2[0]
+            dy = finish_segment.end.y - finish_segment.control2[1]
+        else:
+            dx = finish_segment.end.x - finish_segment.start.x
+            dy = finish_segment.end.y - finish_segment.start.y
 
         heading = math.atan2(dy, dx)
 

@@ -2,7 +2,7 @@
 
 ## Project Vision
 
-CodeRally is a top-down 2D racing game that combines classic rally racing with programmable AI. Players can race using keyboard controls or write Python code to create autonomous racing bots, competing against other humans and bots on procedurally generated tracks.
+CodeRally is a top-down 2D rally racing game that combines classic point-to-point rally stages with programmable AI. Players can race using keyboard controls or write Python code to create autonomous racing bots, competing against other humans and bots on procedurally generated rally stages.
 
 ## Core Features
 
@@ -15,16 +15,17 @@ CodeRally is a top-down 2D racing game that combines classic rally racing with p
 - **Off-track penalty**: Reduced speed when driving off the track
 - **Discrete input model**: Binary accelerate/brake/turn controls
 
-### 2. Track System
+### 2. Stage System
 
-- **Procedural generation**: Each race has a unique track
+- **Procedural generation**: Each race has a unique point-to-point rally stage
+- **Start and finish points**: Stages run from start to finish (not looping circuits)
 - **Surface types**:
   - Asphalt (high grip)
   - Gravel (medium grip)
   - Ice (low grip)
   - Wet asphalt (reduced grip)
 - **Dynamic obstacles**: Objects on track to avoid
-- **Checkpoint system**: For lap counting and validation
+- **Checkpoint system**: For progress tracking and validation along the stage
 
 ### 3. Car System
 
@@ -65,7 +66,7 @@ CodeRally is a top-down 2D racing game that combines classic rally racing with p
 #### Execution Model
 - Hybrid tick/event-based
 - `on_tick()` called ~20 Hz
-- Event callbacks: `on_collision()`, `on_lap_complete()`
+- Event callbacks: `on_collision()`, `on_checkpoint()`, `on_finish()`
 - Asynchronous execution
 
 #### Sensor Data (with Fog of War)
@@ -92,9 +93,10 @@ CodeRally is a top-down 2D racing game that combines classic rally racing with p
 - Headings
 
 **Race state**:
-- Lap count
+- Current checkpoint
 - Position/ranking
 - Time elapsed
+- Distance to finish
 
 #### Security (Sandbox)
 - RestrictedPython execution
@@ -123,8 +125,8 @@ CodeRally is a top-down 2D racing game that combines classic rally racing with p
 
 ### 7. Game Modes
 
-- **Quick Race**: Single race, random track
-- **Championship**: Series of races, cumulative points
+- **Quick Stage**: Single stage, random track
+- **Championship**: Series of stages, cumulative points (like WRC rally format)
 - **Practice Mode**: Solo with debugging tools
 - (Spectator mode inherently supported)
 

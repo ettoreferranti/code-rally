@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Welcome to CodeRally! This guide will teach you how to write Python code to control your racing car. Your bot competes against human players and other bots on procedurally generated rally tracks.
+Welcome to CodeRally! This guide will teach you how to write Python code to control your racing car. Your bot competes against human players and other bots on procedurally generated point-to-point rally stages.
 
 ## Bot Structure
 
@@ -14,14 +14,14 @@ class MyBot:
         """Called once when your bot is loaded."""
         self.name = "My Bot Name"
         # Initialise any variables you need
-        self.lap_count = 0
-    
+        self.checkpoints_passed = 0
+
     def on_tick(self, state):
         """Called every game tick (~20 times per second).
-        
+
         Args:
             state: GameState object with all sensor data
-            
+
         Returns:
             dict: Actions to perform
         """
@@ -33,23 +33,32 @@ class MyBot:
             "use_nitro": False
         }
         return actions
-    
+
     def on_collision(self, event):
         """Called when your car collides with something.
-        
+
         Args:
             event: CollisionEvent with collision details
         """
         pass
-    
-    def on_lap_complete(self, lap_number, lap_time):
-        """Called when you complete a lap.
-        
+
+    def on_checkpoint(self, checkpoint_index, split_time):
+        """Called when you pass a checkpoint.
+
         Args:
-            lap_number: Which lap was completed (1, 2, 3...)
-            lap_time: Time in seconds for that lap
+            checkpoint_index: Index of checkpoint passed (0, 1, 2...)
+            split_time: Time in seconds since stage start
         """
-        self.lap_count = lap_number
+        self.checkpoints_passed = checkpoint_index + 1
+
+    def on_finish(self, finish_time, final_position):
+        """Called when you cross the finish line.
+
+        Args:
+            finish_time: Total time in seconds for the stage
+            final_position: Final race position (1st, 2nd, etc.)
+        """
+        pass
 ```
 
 ## Game State (Sensor Data)
@@ -120,11 +129,12 @@ for opponent in state.opponents:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `lap` | `int` | Current lap number |
-| `total_laps` | `int` | Total laps in race |
+| `current_checkpoint` | `int` | Index of next checkpoint to reach |
+| `total_checkpoints` | `int` | Total checkpoints in stage |
 | `position` | `int` | Your race position (1st, 2nd, etc.) |
 | `total_cars` | `int` | Number of cars in race |
-| `elapsed_time` | `float` | Race time in seconds |
+| `elapsed_time` | `float` | Stage time in seconds |
+| `distance_to_finish` | `float` | Approximate distance to finish line |
 
 ## Actions
 
@@ -162,15 +172,20 @@ class MyBot:
         # self.memory is automatically saved/loaded between races
         if not hasattr(self, 'memory'):
             self.memory = {}
-        
-        # Track statistics across races
-        if 'races' not in self.memory:
-            self.memory['races'] = 0
-        self.memory['races'] += 1
-    
+
+        # Track statistics across stages
+        if 'stages_completed' not in self.memory:
+            self.memory['stages_completed'] = 0
+            self.memory['best_time'] = float('inf')
+
     def on_tick(self, state):
         # Use historical data to improve
         pass
+
+    def on_finish(self, finish_time, final_position):
+        self.memory['stages_completed'] += 1
+        if finish_time < self.memory['best_time']:
+            self.memory['best_time'] = finish_time
 ```
 
 ## Restrictions

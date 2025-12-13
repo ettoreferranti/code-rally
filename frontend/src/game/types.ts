@@ -40,7 +40,10 @@ export interface Track {
   checkpoints: Checkpoint[];
   start_position: [number, number];
   start_heading: number;
+  finish_position: [number, number];
+  finish_heading: number;
   total_length: number;
+  is_looping: boolean;  // false for rally stages, true for circuits
 }
 
 export interface CarState {
@@ -50,12 +53,22 @@ export interface CarState {
   angular_velocity: number;
   is_drifting: boolean;
   drift_angle: number;
+  throttle: number;  // Current throttle level (0-1) for smooth acceleration
+}
+
+export interface RaceInfo {
+  currentCheckpoint: number;  // Next checkpoint index to pass
+  totalCheckpoints: number;
+  isFinished: boolean;
+  finishTime: number | null;  // Time in seconds when finished
+  startTime: number;  // Time in seconds when race started
 }
 
 export interface GameState {
   track: Track;
   cars: CarState[];
   tick: number;
+  raceInfo: RaceInfo;
 }
 
 /**

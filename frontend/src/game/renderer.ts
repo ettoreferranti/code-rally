@@ -205,12 +205,9 @@ export function renderCar(
 ): void {
   ctx.save();
 
-  // Translate to car position
+  // Translate to car position and rotate to heading
   ctx.translate(car.position.x, car.position.y);
-
-  // Compute travel direction from velocity
-  const travelAngle = Math.atan2(car.velocity.y, car.velocity.x);
-  ctx.rotate(travelAngle);
+  ctx.rotate(car.heading);
 
   // Car dimensions (width is along direction of travel = +x in local coords)
   const width = 30;

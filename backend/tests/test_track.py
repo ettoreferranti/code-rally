@@ -97,21 +97,20 @@ class TestTrackGenerator:
         assert len(track.segments) > 0
         assert len(track.checkpoints) > 0
 
-    def test_track_forms_closed_loop(self, generator):
-        """Test that generated track forms a closed loop."""
+    def test_track_is_point_to_point(self, generator):
+        """Test that generated track is point-to-point (not looping)."""
         track = generator.generate()
 
-        # Last segment should connect back to first
-        first_segment = track.segments[0]
-        last_segment = track.segments[-1]
+        # Rally stages should not loop
+        assert track.is_looping is False
 
-        # End of last segment should be close to start of first segment
-        dx = last_segment.end.x - first_segment.start.x
-        dy = last_segment.end.y - first_segment.start.y
+        # Start and finish should be different positions
+        dx = track.finish_position[0] - track.start_position[0]
+        dy = track.finish_position[1] - track.start_position[1]
         distance = math.sqrt(dx**2 + dy**2)
 
-        # Should be very close (within floating point tolerance)
-        assert distance < 1.0
+        # Should be significantly far apart
+        assert distance > 100.0
 
     def test_track_has_variety_of_surfaces(self, generator):
         """Test that tracks have variety in surface types."""
@@ -156,6 +155,25 @@ class TestTrackGenerator:
         assert len(track.start_position) == 2
         assert track.start_heading is not None
         assert -math.pi <= track.start_heading <= math.pi
+
+    def test_finish_position_exists(self, generator):
+        """Test that track has a valid finish position and heading."""
+        track = generator.generate()
+
+        assert track.finish_position is not None
+        assert len(track.finish_position) == 2
+        assert track.finish_heading is not None
+        assert -math.pi <= track.finish_heading <= math.pi
+
+    def test_finish_at_end_of_track(self, generator):
+        """Test that finish position is at the end of the last segment."""
+        track = generator.generate()
+
+        last_segment = track.segments[-1]
+
+        # Finish should be at end of last segment
+        assert abs(track.finish_position[0] - last_segment.end.x) < 0.01
+        assert abs(track.finish_position[1] - last_segment.end.y) < 0.01
 
     def test_reproducible_with_same_seed(self):
         """Test that same seed produces same track on first generation."""
@@ -239,8 +257,8 @@ class TestTrackGenerator:
         assert surface_counts[SurfaceType.ASPHALT] > surface_counts[SurfaceType.GRAVEL]
         assert surface_counts[SurfaceType.ASPHALT] > surface_counts[SurfaceType.ICE]
 
-    def test_control_points_form_loop(self, generator):
-        """Test that control points form a connected loop."""
+    def test_control_points_form_path(self, generator):
+        """Test that control points form a connected path."""
         control_points = generator._generate_control_points("medium")
 
         # Should have at least a few points
@@ -315,3 +333,38 @@ class TestTrackGenerator:
             if segment.control2:
                 assert math.isfinite(segment.control2[0])
                 assert math.isfinite(segment.control2[1])
+
+    def test_surfaces_grouped_in_sections(self, generator):
+        """Test that surfaces are grouped into sections (not changing every segment)."""
+        track = generator.generate()
+
+        # Count consecutive segments with same surface
+        section_lengths = []
+        current_surface = track.segments[0].start.surface
+        current_length = 1
+
+        for i in range(1, len(track.segments)):
+            if track.segments[i].start.surface == current_surface:
+                current_length += 1
+            else:
+                section_lengths.append(current_length)
+                current_surface = track.segments[i].start.surface
+                current_length = 1
+
+        section_lengths.append(current_length)
+
+        # Most sections should be 2-4 segments long
+        # At least some sections should be longer than 1 segment
+        long_sections = [length for length in section_lengths if length >= 2]
+        assert len(long_sections) > 0
+
+    def test_mix_of_straights_and_curves(self, generator):
+        """Test that track has mix of straight and curved segments."""
+        track = generator.generate()
+
+        straight_count = sum(1 for seg in track.segments if seg.is_straight())
+        curved_count = sum(1 for seg in track.segments if not seg.is_straight())
+
+        # Should have both straights and curves
+        assert straight_count > 0
+        assert curved_count > 0

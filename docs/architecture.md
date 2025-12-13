@@ -83,8 +83,8 @@ backend/
 The game engine runs at a fixed tick rate (default: 60 Hz) and manages:
 
 1. **Physics Simulation**: Position, velocity, acceleration, friction, collisions
-2. **Track State**: Surface types, boundaries, checkpoints
-3. **Race State**: Lap counting, positions, timing
+2. **Stage State**: Surface types, boundaries, checkpoints, start and finish positions
+3. **Race State**: Checkpoint progress, car positions, timing
 4. **Bot Execution**: Calling bot code and processing actions
 
 #### Physics Model
@@ -141,7 +141,7 @@ User Python code executes in a RestrictedPython sandbox with:
    b. Call bot.on_tick(state) with timeout
    c. Validate returned actions
    d. Apply actions to car
-4. Event callbacks (on_collision, on_lap_complete, etc.)
+4. Event callbacks (on_collision, on_checkpoint, on_finish, etc.)
 5. Bot state persisted after race
 ```
 
@@ -201,8 +201,8 @@ CREATE TABLE race_results (
     car_id INTEGER REFERENCES cars(id),
     bot_id INTEGER REFERENCES bots(id),
     position INTEGER,
-    total_time REAL,
-    best_lap REAL,
+    stage_time REAL,
+    dnf BOOLEAN DEFAULT FALSE,
     points_earned INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -284,16 +284,19 @@ class Settings:
     HOST = "0.0.0.0"
     PORT = 8000
     MAX_CONCURRENT_PLAYERS = 8
-    
+
     # Game
     TICK_RATE = 60  # Hz
     BOT_TICK_RATE = 20  # Hz (bot called every 3rd tick)
-    DEFAULT_LAPS = 3
-    
+
+    # Stage generation
+    STAGE_MIN_LENGTH = 1000  # units
+    STAGE_MAX_LENGTH = 3000  # units
+
     # Bot sandbox
     BOT_MEMORY_LIMIT_MB = 50
     BOT_EXECUTION_TIMEOUT_MS = 10
-    
+
     # Database
     DATABASE_URL = "sqlite:///./coderally.db"
 ```

@@ -216,8 +216,10 @@ Bot lifecycle:
 1. Code validated on save
 2. Bot instantiated at race start
 3. `on_tick()` called every ~50ms (20Hz)
-4. Event callbacks for collisions, lap completion
+4. Event callbacks for collisions, checkpoints, finish line
 5. State persisted after race
+
+**Note**: Rally stages use point-to-point format (not looping circuits). See `docs/rally-stage-migration.md` for details.
 
 ### Physics Model
 
@@ -279,10 +281,10 @@ Access at http://localhost:5173
 
 | Milestone | Focus | Key Deliverable |
 |-----------|-------|-----------------|
-| M1: Foundation | Core engine, physics, rendering | Single car driving on track |
-| M2: Racing | Collisions, laps, surfaces | Complete race loop |
+| M1: Foundation | Core engine, physics, rendering | Single car driving on point-to-point stage |
+| M2: Racing | Collisions, checkpoints, surfaces | Complete rally stage |
 | M3: Bot Framework | Sandbox, API, editor | Programmable bots |
-| M4: Multiplayer | WebSocket, sync | Multi-player races |
+| M4: Multiplayer | WebSocket, sync | Multi-player stages |
 | M5: Progression | Users, garage, upgrades | Persistent progress |
 | M6: Polish | Championship, debugging | Release-ready |
 
