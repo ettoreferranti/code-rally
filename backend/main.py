@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from app.config import get_settings
 from app.database import init_db
-from app.api.routes import health, tracks
+from app.api.routes import health, tracks, game
 
 settings = get_settings()
 
@@ -66,6 +66,7 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router, tags=["health"])
 app.include_router(tracks.router, tags=["tracks"])
+app.include_router(game.router, tags=["game"])
 
 
 @app.get("/")

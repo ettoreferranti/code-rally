@@ -26,6 +26,12 @@ export default function Layout() {
                 Race
               </Link>
               <Link
+                to="/multiplayer"
+                className="px-4 py-2 rounded hover:bg-white/20 transition"
+              >
+                Multiplayer
+              </Link>
+              <Link
                 to="/editor"
                 className="px-4 py-2 rounded hover:bg-white/20 transition"
               >
