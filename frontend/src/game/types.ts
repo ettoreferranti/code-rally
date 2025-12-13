@@ -35,6 +35,17 @@ export interface Checkpoint {
   index: number;
 }
 
+export interface ContainmentBoundary {
+  left_points: [number, number][];
+  right_points: [number, number][];
+}
+
+export interface Obstacle {
+  position: [number, number];
+  radius: number;
+  type: string;  // 'rock', 'tree', 'building'
+}
+
 export interface Track {
   segments: TrackSegment[];
   checkpoints: Checkpoint[];
@@ -44,6 +55,8 @@ export interface Track {
   finish_heading: number;
   total_length: number;
   is_looping: boolean;  // false for rally stages, true for circuits
+  containment?: ContainmentBoundary;  // Outer collision walls
+  obstacles: Obstacle[];  // Off-road obstacles
 }
 
 export interface CarState {

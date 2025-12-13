@@ -156,9 +156,85 @@ function renderSegment(
 }
 
 /**
+ * Render containment boundaries (outer walls).
+ */
+function renderContainment(ctx: CanvasRenderingContext2D, track: Track): void {
+  if (!track.containment) return;
+
+  const { left_points, right_points } = track.containment;
+
+  // Draw containment walls as thick brown/gray lines
+  ctx.strokeStyle = '#6b5b47';
+  ctx.lineWidth = 8;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Draw left wall
+  ctx.beginPath();
+  ctx.moveTo(left_points[0][0], left_points[0][1]);
+  for (let i = 1; i < left_points.length; i++) {
+    ctx.lineTo(left_points[i][0], left_points[i][1]);
+  }
+  ctx.stroke();
+
+  // Draw right wall
+  ctx.beginPath();
+  ctx.moveTo(right_points[0][0], right_points[0][1]);
+  for (let i = 1; i < right_points.length; i++) {
+    ctx.lineTo(right_points[i][0], right_points[i][1]);
+  }
+  ctx.stroke();
+}
+
+/**
+ * Render obstacles in off-road areas.
+ */
+function renderObstacles(ctx: CanvasRenderingContext2D, track: Track): void {
+  if (!track.obstacles || track.obstacles.length === 0) return;
+
+  for (const obstacle of track.obstacles) {
+    const [x, y] = obstacle.position;
+    const radius = obstacle.radius;
+
+    // Choose color based on obstacle type
+    let color: string;
+    switch (obstacle.type) {
+      case 'rock':
+        color = '#5a5a5a';
+        break;
+      case 'tree':
+        color = '#2d5016';
+        break;
+      case 'building':
+        color = '#8b4513';
+        break;
+      default:
+        color = '#666666';
+    }
+
+    // Draw obstacle as filled circle
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw outline
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+/**
  * Render the entire track.
  */
 export function renderTrack(ctx: CanvasRenderingContext2D, track: Track): void {
+  // Draw containment boundaries first (background)
+  renderContainment(ctx, track);
+
+  // Draw obstacles
+  renderObstacles(ctx, track);
+
   // Draw all segments
   for (const segment of track.segments) {
     renderSegment(ctx, segment);

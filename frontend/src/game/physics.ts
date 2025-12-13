@@ -7,7 +7,7 @@
 
 import type { Vector2, CarState, SurfaceType, InputState, Track } from './types';
 import { SurfaceType as SurfaceTypeEnum } from './types';
-import { isOnTrack } from './trackUtils';
+import { isOnTrack, checkBoundaryCollision, checkObstacleCollision } from './trackUtils';
 
 /**
  * Physics constants - tuned for responsive arcade-style controls.
@@ -35,7 +35,12 @@ const PHYSICS_CONFIG = {
 
   // Off-track penalties
   OFF_TRACK_SPEED_MULTIPLIER: 0.5,  // Speed reduction when off-track
-  OFF_TRACK_GRIP_MULTIPLIER: 0.3    // Grip reduction when off-track
+  OFF_TRACK_GRIP_MULTIPLIER: 0.3,    // Grip reduction when off-track
+
+  // Collision
+  COLLISION_ELASTICITY: 0.7,  // Bounce coefficient (0 = no bounce, 1 = perfect bounce)
+  CAR_RADIUS: 10,  // Car radius for collision detection
+  MIN_COLLISION_SPEED: 5.0  // Minimum speed to trigger bounce (prevent jitter)
 };
 
 /**
@@ -141,6 +146,12 @@ export class CarPhysics {
 
     // Update position
     newState = this.updatePosition(newState, dt);
+
+    // Handle boundary collisions
+    newState = this.handleBoundaryCollision(newState, track);
+
+    // Handle obstacle collisions
+    newState = this.handleObstacleCollision(newState, track);
 
     return newState;
   }
@@ -362,6 +373,103 @@ export class CarPhysics {
     return {
       ...state,
       position: newPosition
+    };
+  }
+
+  private handleBoundaryCollision(state: CarState, track: Track): CarState {
+    // Check for collision with track boundaries
+    const collision = checkBoundaryCollision(track, state.position, PHYSICS_CONFIG.CAR_RADIUS);
+
+    if (!collision.collided || !collision.normal || !collision.penetration) {
+      return state;
+    }
+
+    // Only apply bounce if car is moving fast enough
+    const speed = Vector2Utils.magnitude(state.velocity);
+    if (speed < PHYSICS_CONFIG.MIN_COLLISION_SPEED) {
+      // Just push car back to valid position
+      const pushback = Vector2Utils.multiply(collision.normal, collision.penetration);
+      return {
+        ...state,
+        position: Vector2Utils.add(state.position, pushback),
+        velocity: Vector2Utils.multiply(state.velocity, 0.5)  // Dampen velocity
+      };
+    }
+
+    // Calculate reflection using elastic collision formula
+    // v' = v - (1 + e) * (v · n) * n
+    // where e is elasticity coefficient, n is collision normal
+
+    const velocityDotNormal = Vector2Utils.dot(state.velocity, collision.normal);
+
+    // Only bounce if moving into the wall (not away from it)
+    if (velocityDotNormal >= 0) {
+      return state;  // Already moving away from wall
+    }
+
+    // Apply elastic bounce
+    const bounce = Vector2Utils.multiply(
+      collision.normal,
+      -(1 + PHYSICS_CONFIG.COLLISION_ELASTICITY) * velocityDotNormal
+    );
+
+    const newVelocity = Vector2Utils.add(state.velocity, bounce);
+
+    // Push car back out of the boundary
+    const pushback = Vector2Utils.multiply(collision.normal, collision.penetration);
+    const newPosition = Vector2Utils.add(state.position, pushback);
+
+    return {
+      ...state,
+      position: newPosition,
+      velocity: newVelocity
+    };
+  }
+
+  private handleObstacleCollision(state: CarState, track: Track): CarState {
+    // Check for collision with obstacles
+    const collision = checkObstacleCollision(track, state.position, PHYSICS_CONFIG.CAR_RADIUS);
+
+    if (!collision.collided || !collision.normal || !collision.penetration) {
+      return state;
+    }
+
+    // Only apply bounce if car is moving fast enough
+    const speed = Vector2Utils.magnitude(state.velocity);
+    if (speed < PHYSICS_CONFIG.MIN_COLLISION_SPEED) {
+      // Just push car back to valid position
+      const pushback = Vector2Utils.multiply(collision.normal, collision.penetration);
+      return {
+        ...state,
+        position: Vector2Utils.add(state.position, pushback),
+        velocity: Vector2Utils.multiply(state.velocity, 0.5)  // Dampen velocity
+      };
+    }
+
+    // Calculate reflection using elastic collision formula
+    const velocityDotNormal = Vector2Utils.dot(state.velocity, collision.normal);
+
+    // Only bounce if moving into the obstacle (not away from it)
+    if (velocityDotNormal >= 0) {
+      return state;  // Already moving away from obstacle
+    }
+
+    // Apply elastic bounce
+    const bounce = Vector2Utils.multiply(
+      collision.normal,
+      -(1 + PHYSICS_CONFIG.COLLISION_ELASTICITY) * velocityDotNormal
+    );
+
+    const newVelocity = Vector2Utils.add(state.velocity, bounce);
+
+    // Push car back out of the obstacle
+    const pushback = Vector2Utils.multiply(collision.normal, collision.penetration);
+    const newPosition = Vector2Utils.add(state.position, pushback);
+
+    return {
+      ...state,
+      position: newPosition,
+      velocity: newVelocity
     };
   }
 }

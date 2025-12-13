@@ -70,6 +70,34 @@ class Checkpoint:
 
 
 @dataclass
+class ContainmentBoundary:
+    """
+    Boundary edge that defines the collidable walls around the track.
+
+    Attributes:
+        left_points: List of points defining the left containment wall
+        right_points: List of points defining the right containment wall
+    """
+    left_points: List[Tuple[float, float]]
+    right_points: List[Tuple[float, float]]
+
+
+@dataclass
+class Obstacle:
+    """
+    An obstacle in the off-road area (rock, tree, building, etc.).
+
+    Attributes:
+        position: Center position of obstacle
+        radius: Collision radius
+        type: Obstacle type ('rock', 'tree', 'building')
+    """
+    position: Tuple[float, float]
+    radius: float
+    type: str
+
+
+@dataclass
 class Track:
     """
     Complete track definition.
@@ -83,6 +111,8 @@ class Track:
         finish_heading: Finish line heading (radians)
         total_length: Approximate total track length
         is_looping: Whether track loops back to start (False for rally stages)
+        containment: Containment boundaries (outer walls for collision)
+        obstacles: List of obstacles in off-road areas
     """
     segments: List[TrackSegment]
     checkpoints: List[Checkpoint]
@@ -92,6 +122,8 @@ class Track:
     finish_heading: float
     total_length: float = 0.0
     is_looping: bool = False
+    containment: Optional[ContainmentBoundary] = None
+    obstacles: List[Obstacle] = field(default_factory=list)
 
 
 class TrackGenerator:
@@ -144,6 +176,13 @@ class TrackGenerator:
         # Determine finish position and heading
         finish_pos, finish_heading = self._get_finish_position(segments)
 
+        # Generate containment boundaries (outer collision walls)
+        # DISABLED FOR NOW - geometric issues with curve offsetting
+        containment = None  # self._generate_containment_boundaries(segments)
+
+        # Generate obstacles in off-road areas
+        obstacles = self._generate_obstacles(segments, containment)
+
         return Track(
             segments=segments,
             checkpoints=checkpoints,
@@ -152,7 +191,9 @@ class TrackGenerator:
             finish_position=finish_pos,
             finish_heading=finish_heading,
             total_length=total_length,
-            is_looping=False
+            is_looping=False,
+            containment=containment,
+            obstacles=obstacles
         )
 
     def _generate_control_points(self, difficulty: str) -> List[TrackPoint]:
@@ -561,3 +602,273 @@ class TrackGenerator:
         heading = math.atan2(dy, dx)
 
         return position, heading
+
+    def _generate_containment_boundaries(self, segments: List[TrackSegment]) -> ContainmentBoundary:
+        """
+        Generate containment boundaries (outer collision walls) around the track.
+
+        Uses a simplified approach: create boundaries at segment endpoints only
+        to avoid self-intersections on curves.
+
+        Args:
+            segments: List of track segments
+
+        Returns:
+            ContainmentBoundary with left and right wall points
+        """
+        left_points = []
+        right_points = []
+
+        distance_multiplier = self.config.CONTAINMENT_DISTANCE
+
+        # Process each segment endpoint
+        for seg_idx, segment in enumerate(segments):
+            # Start point
+            x = segment.start.x
+            y = segment.start.y
+
+            # Calculate direction at start
+            if segment.control1:
+                # Use control point for direction
+                dx = segment.control1[0] - segment.start.x
+                dy = segment.control1[1] - segment.start.y
+            else:
+                # Straight segment
+                dx = segment.end.x - segment.start.x
+                dy = segment.end.y - segment.start.y
+
+            # Normalize
+            length = math.sqrt(dx**2 + dy**2)
+            if length > 0:
+                dx /= length
+                dy /= length
+
+            # Perpendicular normal (left side)
+            normal_x = -dy
+            normal_y = dx
+
+            track_half_width = segment.start.width / 2
+            off_road_distance = track_half_width * distance_multiplier
+            total_distance_from_center = track_half_width + off_road_distance
+
+            # Create boundary points
+            left_x = x + normal_x * total_distance_from_center
+            left_y = y + normal_y * total_distance_from_center
+            right_x = x - normal_x * total_distance_from_center
+            right_y = y - normal_y * total_distance_from_center
+
+            left_points.append((left_x, left_y))
+            right_points.append((right_x, right_y))
+
+        # Add final endpoint
+        last_segment = segments[-1]
+        x = last_segment.end.x
+        y = last_segment.end.y
+
+        # Direction at end
+        if last_segment.control2:
+            dx = last_segment.end.x - last_segment.control2[0]
+            dy = last_segment.end.y - last_segment.control2[1]
+        else:
+            dx = last_segment.end.x - last_segment.start.x
+            dy = last_segment.end.y - last_segment.start.y
+
+        length = math.sqrt(dx**2 + dy**2)
+        if length > 0:
+            dx /= length
+            dy /= length
+
+        normal_x = -dy
+        normal_y = dx
+
+        track_half_width = last_segment.end.width / 2
+        off_road_distance = track_half_width * distance_multiplier
+        total_distance_from_center = track_half_width + off_road_distance
+
+        left_x = x + normal_x * total_distance_from_center
+        left_y = y + normal_y * total_distance_from_center
+        right_x = x - normal_x * total_distance_from_center
+        right_y = y - normal_y * total_distance_from_center
+
+        left_points.append((left_x, left_y))
+        right_points.append((right_x, right_y))
+
+        return ContainmentBoundary(
+            left_points=left_points,
+            right_points=right_points
+        )
+
+    def _smooth_distances(self, distances: List[float], smoothing_factor: float) -> List[float]:
+        """
+        Apply smoothing to containment distances for gradual transitions.
+
+        Args:
+            distances: Raw distance values
+            smoothing_factor: Smoothing strength (0 = no smoothing, 1 = maximum smoothing)
+
+        Returns:
+            Smoothed distance values
+        """
+        if len(distances) <= 1 or smoothing_factor <= 0:
+            return distances
+
+        smoothed = distances.copy()
+
+        # Apply multiple passes of averaging for smoother results
+        num_passes = max(1, int(smoothing_factor * 3))
+
+        for _ in range(num_passes):
+            new_smoothed = [smoothed[0]]  # Keep first value
+
+            for i in range(1, len(smoothed) - 1):
+                # Average with neighbors, weighted by smoothing factor
+                avg = (smoothed[i - 1] + smoothed[i] + smoothed[i + 1]) / 3
+                new_smoothed.append(smoothed[i] * (1 - smoothing_factor) + avg * smoothing_factor)
+
+            new_smoothed.append(smoothed[-1])  # Keep last value
+            smoothed = new_smoothed
+
+        return smoothed
+
+    def _generate_obstacles(self, segments: List[TrackSegment], containment: ContainmentBoundary) -> List[Obstacle]:
+        """
+        Generate obstacles in off-road areas within the containment boundary.
+
+        Args:
+            segments: List of track segments
+            containment: Containment boundary defining the playable area
+
+        Returns:
+            List of obstacles
+        """
+        obstacles = []
+
+        # Calculate approximate off-road area
+        # This is a rough estimate: total containment area minus track area
+        total_area = 0.0
+
+        for segment in segments:
+            # Estimate segment length
+            if segment.is_straight():
+                dx = segment.end.x - segment.start.x
+                dy = segment.end.y - segment.start.y
+                length = math.sqrt(dx**2 + dy**2)
+            else:
+                # Approximate bezier length
+                length = 0.0
+                num_samples = 10
+                prev_x = segment.start.x
+                prev_y = segment.start.y
+
+                for i in range(1, num_samples + 1):
+                    t = i / num_samples
+                    x, y = self._bezier_point(
+                        (segment.start.x, segment.start.y),
+                        segment.control1,
+                        segment.control2,
+                        (segment.end.x, segment.end.y),
+                        t
+                    )
+                    dx = x - prev_x
+                    dy = y - prev_y
+                    length += math.sqrt(dx**2 + dy**2)
+                    prev_x = x
+                    prev_y = y
+
+            # Approximate width (average of start and end, plus containment distance)
+            avg_width = (segment.start.width + segment.end.width) / 2
+            # Off-road width is roughly 2x track width on each side (rough estimate)
+            off_road_width = avg_width * 3  # Total off-road on both sides
+            total_area += length * off_road_width
+
+        # Calculate number of obstacles based on density
+        num_obstacles = int(total_area * self.config.OBSTACLE_DENSITY / 1000)
+
+        # Place obstacles randomly in off-road areas
+        for _ in range(num_obstacles):
+            # Pick random segment
+            segment = random.choice(segments)
+
+            # Pick random position along segment
+            t = random.random()
+
+            if segment.is_straight():
+                center_x = segment.start.x + t * (segment.end.x - segment.start.x)
+                center_y = segment.start.y + t * (segment.end.y - segment.start.y)
+
+                dx = segment.end.x - segment.start.x
+                dy = segment.end.y - segment.start.y
+            else:
+                center_x, center_y = self._bezier_point(
+                    (segment.start.x, segment.start.y),
+                    segment.control1,
+                    segment.control2,
+                    (segment.end.x, segment.end.y),
+                    t
+                )
+
+                # Get tangent
+                t_delta = 0.01
+                if t > 0.5:
+                    t_prev = max(0, t - t_delta)
+                    x_prev, y_prev = self._bezier_point(
+                        (segment.start.x, segment.start.y),
+                        segment.control1,
+                        segment.control2,
+                        (segment.end.x, segment.end.y),
+                        t_prev
+                    )
+                    dx = center_x - x_prev
+                    dy = center_y - y_prev
+                else:
+                    t_next = min(1, t + t_delta)
+                    x_next, y_next = self._bezier_point(
+                        (segment.start.x, segment.start.y),
+                        segment.control1,
+                        segment.control2,
+                        (segment.end.x, segment.end.y),
+                        t_next
+                    )
+                    dx = x_next - center_x
+                    dy = y_next - center_y
+
+            # Normalize tangent
+            length = math.sqrt(dx**2 + dy**2)
+            if length > 0:
+                dx /= length
+                dy /= length
+
+            # Perpendicular normal
+            normal_x = -dy
+            normal_y = dx
+
+            # Place obstacle off-track (beyond minimum distance)
+            half_width = segment.start.width / 2
+            min_offset = half_width + self.config.OBSTACLE_MIN_DISTANCE_FROM_TRACK
+
+            # Random offset in off-road area (up to containment boundary)
+            max_offset = half_width + (segment.start.width * self.config.CONTAINMENT_MAX_DISTANCE)
+            offset = random.uniform(min_offset, max_offset)
+
+            # Random side (left or right)
+            side = random.choice([-1, 1])
+
+            obstacle_x = center_x + normal_x * offset * side
+            obstacle_y = center_y + normal_y * offset * side
+
+            # Random radius
+            radius = random.uniform(
+                self.config.OBSTACLE_MIN_RADIUS,
+                self.config.OBSTACLE_MAX_RADIUS
+            )
+
+            # Random type
+            obstacle_type = random.choice(self.config.OBSTACLE_TYPES)
+
+            obstacles.append(Obstacle(
+                position=(obstacle_x, obstacle_y),
+                radius=radius,
+                type=obstacle_type
+            ))
+
+        return obstacles

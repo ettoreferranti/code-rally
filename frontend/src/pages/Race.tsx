@@ -2,15 +2,63 @@ import { useState, useEffect, useCallback } from 'react';
 import { GameCanvas, createMockGameState, useKeyboardInput, useGameLoop } from '../game';
 import type { GameState, GameLoopCallbacks } from '../game';
 import { RaceHUD } from '../components/RaceHUD';
+import { generateTrack } from '../services';
 
 export default function Race() {
   const [gameState, setGameState] = useState<GameState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const inputState = useKeyboardInput();
 
-  // Initialize game state once
+  // Initialize game state once - fetch track from API
   useEffect(() => {
-    const initialState = createMockGameState();
-    setGameState(initialState);
+    async function initializeRace() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch track from backend API
+        const track = await generateTrack({ difficulty: 'medium', seed: 42 });
+
+        // Create initial car state at start position
+        const car = {
+          position: { x: track.start_position[0], y: track.start_position[1] },
+          velocity: { x: 0, y: 0 },
+          heading: track.start_heading,
+          angular_velocity: 0,
+          is_drifting: false,
+          drift_angle: 0,
+          throttle: 0,
+          is_off_track: false
+        };
+
+        // Create game state
+        const initialState: GameState = {
+          track,
+          cars: [car],
+          tick: 0,
+          raceInfo: {
+            currentCheckpoint: 0,
+            totalCheckpoints: track.checkpoints.length,
+            isFinished: false,
+            finishTime: null,
+            startTime: Date.now() / 1000
+          }
+        };
+
+        setGameState(initialState);
+      } catch (err) {
+        console.error('Failed to load track:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load track');
+        // Fallback to mock data
+        const initialState = createMockGameState();
+        setGameState(initialState);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    initializeRace();
   }, []);
 
   // Game loop callback to update state
@@ -23,11 +71,38 @@ export default function Race() {
   // Run the game loop with physics
   useGameLoop(gameState, inputState, callbacks);
 
+  if (loading) {
+    return (
+      <div className="p-8">
+        <h2 className="text-3xl font-bold mb-4">Rally Stage</h2>
+        <div className="mt-8 bg-gray-800 p-4 rounded-lg text-center py-12">
+          <p className="text-xl text-gray-400">Loading track from server...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8">
+        <h2 className="text-3xl font-bold mb-4">Rally Stage</h2>
+        <div className="mt-8 bg-red-900/20 border border-red-600 p-4 rounded-lg">
+          <p className="text-red-400">Error: {error}</p>
+          <p className="text-sm text-gray-400 mt-2">Using fallback mock data instead.</p>
+        </div>
+        <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
+          <GameCanvas gameState={gameState} width={800} height={600} />
+          {gameState && <RaceHUD raceInfo={gameState.raceInfo} car={gameState.cars[0]} />}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8">
       <h2 className="text-3xl font-bold mb-4">Rally Stage</h2>
       <p className="text-gray-300 mb-4">
-        Drive through the point-to-point rally stage and reach the finish line as fast as you can!
+        Drive through the procedurally generated rally stage with containment walls and obstacles!
       </p>
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
         <GameCanvas gameState={gameState} width={800} height={600} />
@@ -78,9 +153,14 @@ export default function Race() {
         <p>Features demonstrated:</p>
         <ul className="list-disc list-inside ml-4 mt-2">
           <li>Real-time physics simulation at 60Hz</li>
+          <li>Procedurally generated tracks from backend API</li>
+          <li>Containment boundaries (outer walls) with variable distance from track</li>
+          <li>Dynamic obstacles (rocks, trees, buildings) in off-road areas</li>
+          <li>Elastic collision physics for walls and obstacles</li>
           <li>Point-to-point rally stage (start to finish)</li>
           <li>Checkpoint progress tracking and finish line detection</li>
           <li>Multiple surface types with varying grip (asphalt, wet, gravel, ice)</li>
+          <li>Off-track detection with speed and grip penalties</li>
           <li>Arcade-style drift physics with strong lateral friction</li>
           <li>Smooth throttle and turn ramping (no "ticking")</li>
           <li>Smooth camera following player</li>

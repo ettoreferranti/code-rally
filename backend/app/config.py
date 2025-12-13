@@ -35,6 +35,21 @@ class GameConfig:
     CHECKPOINT_SPACING: int = 200  # Approximate distance between checkpoints
     FINISH_GRACE_PERIOD: int = 30  # Seconds after first finisher before DNF
 
+    # Containment boundaries (outer walls that cars collide with)
+    CONTAINMENT_DISTANCE: float = 1.0  # Fixed distance from track edge (multiplier of track width) - for testing
+    CONTAINMENT_MIN_DISTANCE: float = 0.5  # Minimum distance from track edge (multiplier of track width)
+    CONTAINMENT_MAX_DISTANCE: float = 2.0  # Maximum distance from track edge (multiplier of track width)
+    CONTAINMENT_SMOOTHING: float = 0.7  # Smoothing factor for transitions between segments (0-1, higher = smoother)
+    BOTTLENECK_PROBABILITY: float = 0.0  # Chance of creating a tight bottleneck per section (disabled for now)
+    BOTTLENECK_DISTANCE: float = 0.3  # Containment distance multiplier for bottlenecks (tight squeeze, min from track edge)
+
+    # Obstacles (rocks, trees, buildings in off-road areas)
+    OBSTACLE_DENSITY: float = 0.02  # Average obstacles per 1000 square units of off-road area
+    OBSTACLE_MIN_RADIUS: float = 5.0  # Minimum obstacle size
+    OBSTACLE_MAX_RADIUS: float = 20.0  # Maximum obstacle size
+    OBSTACLE_MIN_DISTANCE_FROM_TRACK: float = 30.0  # Minimum distance from track centerline
+    OBSTACLE_TYPES: tuple = ('rock', 'tree', 'building')  # Available obstacle types
+
     # Surface distribution (probabilities)
     SURFACE_ASPHALT_WEIGHT: float = 0.5
     SURFACE_GRAVEL_WEIGHT: float = 0.2

@@ -1,2 +1,2 @@
-// API and WebSocket client exports will go here
-export {}
+// API and WebSocket client exports
+export { generateTrack, type GenerateTrackParams } from './trackApi';

@@ -185,7 +185,9 @@ export function createMockGameState(): GameState {
       finish_position: [finishPos.x, finishPos.y],
       finish_heading: finishHeading,
       total_length: totalLength,
-      is_looping: false
+      is_looping: false,
+      containment: undefined,  // No containment in mock data
+      obstacles: []  // No obstacles in mock data
     },
     cars: [car],
     tick: 0,
