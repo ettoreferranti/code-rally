@@ -363,15 +363,82 @@ class GameEngine:
         checkpoint = self.state.track.checkpoints[player.current_checkpoint]
         cp_x, cp_y = checkpoint.position
 
-        # Simple distance check
-        dx = player.car.position.x - cp_x
-        dy = player.car.position.y - cp_y
-        distance = (dx * dx + dy * dy) ** 0.5
+        # Create checkpoint line perpendicular to its angle
+        # The checkpoint angle points along the track direction
+        # We want a line perpendicular to this
+        import math
+        perp_angle = checkpoint.angle + math.pi / 2
 
-        # If within checkpoint width, consider it passed
-        if distance < checkpoint.width / 2:
-            player.checkpoints_passed.add(player.current_checkpoint)
-            player.current_checkpoint += 1
+        # Calculate checkpoint line endpoints (perpendicular to track direction)
+        half_width = checkpoint.width / 2
+        line_p1_x = cp_x + math.cos(perp_angle) * half_width
+        line_p1_y = cp_y + math.sin(perp_angle) * half_width
+        line_p2_x = cp_x - math.cos(perp_angle) * half_width
+        line_p2_y = cp_y - math.sin(perp_angle) * half_width
+
+        # Check if car crossed the checkpoint line
+        # We need the previous position to detect crossing
+        if not hasattr(player, '_prev_position'):
+            player._prev_position = player.car.position
+            return
+
+        prev_x = player._prev_position.x
+        prev_y = player._prev_position.y
+        curr_x = player.car.position.x
+        curr_y = player.car.position.y
+
+        # Check if line segments intersect (car path vs checkpoint line)
+        crossed = self._line_segments_intersect(
+            prev_x, prev_y, curr_x, curr_y,
+            line_p1_x, line_p1_y, line_p2_x, line_p2_y
+        )
+
+        if crossed:
+            # Check if crossing in the forward direction
+            # Dot product of movement direction with checkpoint direction
+            move_dx = curr_x - prev_x
+            move_dy = curr_y - prev_y
+            cp_dir_x = math.cos(checkpoint.angle)
+            cp_dir_y = math.sin(checkpoint.angle)
+
+            dot_product = move_dx * cp_dir_x + move_dy * cp_dir_y
+
+            # Only count if moving forward through checkpoint
+            if dot_product > 0:
+                player.checkpoints_passed.add(player.current_checkpoint)
+                player.current_checkpoint += 1
+
+        # Update previous position for next frame
+        player._prev_position = Vector2(curr_x, curr_y)
+
+    def _line_segments_intersect(
+        self,
+        p1_x: float, p1_y: float, p2_x: float, p2_y: float,
+        p3_x: float, p3_y: float, p4_x: float, p4_y: float
+    ) -> bool:
+        """
+        Check if two line segments intersect.
+
+        Uses the cross product method to determine if line segment p1-p2
+        intersects with line segment p3-p4.
+
+        Args:
+            p1_x, p1_y: First point of first line segment
+            p2_x, p2_y: Second point of first line segment
+            p3_x, p3_y: First point of second line segment
+            p4_x, p4_y: Second point of second line segment
+
+        Returns:
+            True if the line segments intersect, False otherwise
+        """
+        def ccw(ax: float, ay: float, bx: float, by: float, cx: float, cy: float) -> bool:
+            """Check if three points are in counter-clockwise order."""
+            return (cy - ay) * (bx - ax) > (by - ay) * (cx - ax)
+
+        # Two segments intersect if the endpoints of each segment are on
+        # opposite sides of the other segment
+        return (ccw(p1_x, p1_y, p3_x, p3_y, p4_x, p4_y) != ccw(p2_x, p2_y, p3_x, p3_y, p4_x, p4_y) and
+                ccw(p1_x, p1_y, p2_x, p2_y, p3_x, p3_y) != ccw(p1_x, p1_y, p2_x, p2_y, p4_x, p4_y))
 
     def _check_finish(self, player: PlayerState) -> None:
         """
