@@ -16,6 +16,15 @@ export default function MultiplayerRace() {
   const inputState = useKeyboardInput();
   const wsRef = useRef<GameWebSocketClient | null>(null);
   const inputIntervalRef = useRef<number | null>(null);
+  const trackRef = useRef<Track | null>(null);
+  const playerIdRef = useRef<string | null>(null);
+
+  // Log when game state changes
+  useEffect(() => {
+    if (gameState) {
+      console.log('Game state updated! Tick:', gameState.tick, 'Status:', gameState.raceInfo);
+    }
+  }, [gameState]);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -25,18 +34,38 @@ export default function MultiplayerRace() {
         setSessionId(sid);
         setPlayerId(pid);
         setTrack(receivedTrack);
+
+        // Update refs for use in callbacks
+        trackRef.current = receivedTrack;
+        playerIdRef.current = pid;
+
         setLoading(false);
+        setError(null);  // Clear any previous errors
       },
 
       onGameState: (state: GameStateMessage['data']) => {
-        // Convert server state to frontend GameState format
-        if (!track || !playerId) return;
+        console.log('Received game state update:', state.tick, state.race_info.status);
 
-        const playerData = state.players[playerId];
-        if (!playerData) return;
+        // Use refs to get current values (avoids closure issue)
+        const currentTrack = trackRef.current;
+        const currentPlayerId = playerIdRef.current;
+
+        console.log('Current track:', currentTrack, 'playerId:', currentPlayerId);
+
+        // Convert server state to frontend GameState format
+        if (!currentTrack || !currentPlayerId) {
+          console.log('Missing track or playerId, skipping update - track:', currentTrack, 'playerId:', currentPlayerId);
+          return;
+        }
+
+        const playerData = state.players[currentPlayerId];
+        if (!playerData) {
+          console.log('No player data for', currentPlayerId);
+          return;
+        }
 
         const newGameState: GameState = {
-          track,
+          track: currentTrack,
           cars: [{
             position: playerData.car.position,
             velocity: playerData.car.velocity,
@@ -50,7 +79,7 @@ export default function MultiplayerRace() {
           tick: state.tick,
           raceInfo: {
             currentCheckpoint: playerData.current_checkpoint,
-            totalCheckpoints: track.checkpoints.length,
+            totalCheckpoints: currentTrack.checkpoints.length,
             isFinished: playerData.is_finished,
             finishTime: playerData.finish_time,
             startTime: state.race_info.start_time,
@@ -58,6 +87,7 @@ export default function MultiplayerRace() {
           }
         };
 
+        console.log('Setting game state, tick:', state.tick);
         setGameState(newGameState);
       },
 
@@ -86,15 +116,24 @@ export default function MultiplayerRace() {
 
   // Send inputs to server at regular intervals (60 FPS)
   useEffect(() => {
-    if (!wsRef.current || !wsRef.current.isConnected()) return;
+    if (!wsRef.current || !wsRef.current.isConnected()) {
+      console.log('Not setting up input interval - WebSocket not connected');
+      return;
+    }
 
     // Clear existing interval
     if (inputIntervalRef.current) {
       clearInterval(inputIntervalRef.current);
     }
 
+    console.log('Setting up input interval at 60 FPS');
+
     // Send inputs at 60 FPS
     inputIntervalRef.current = window.setInterval(() => {
+      // Only log when there's actual input
+      if (inputState.accelerate || inputState.brake || inputState.turnLeft || inputState.turnRight || inputState.nitro) {
+        console.log('Sending input:', inputState);
+      }
       wsRef.current?.sendInput(inputState);
     }, 1000 / 60);
 
@@ -106,9 +145,13 @@ export default function MultiplayerRace() {
   }, [inputState]);
 
   const handleStartRace = () => {
+    console.log('Start Race clicked');
     if (wsRef.current && wsRef.current.isConnected()) {
+      console.log('Sending start race command...');
       wsRef.current.startRace();
       setRaceStarted(true);
+    } else {
+      console.log('WebSocket not connected!');
     }
   };
 

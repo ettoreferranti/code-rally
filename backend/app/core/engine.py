@@ -267,9 +267,15 @@ class GameEngine:
 
         return closest_surface
 
-    def _get_grip_coefficient(self, surface: str) -> float:
+    def _get_grip_coefficient(self, surface) -> float:
         """Get grip coefficient for a surface type."""
-        surface_lower = surface.lower()
+        # Handle both SurfaceType enum and string
+        if hasattr(surface, 'value'):
+            surface_str = surface.value
+        else:
+            surface_str = surface
+
+        surface_lower = surface_str.lower()
         if surface_lower == 'wet':
             return self.settings.physics.GRIP_WET
         elif surface_lower == 'gravel':
