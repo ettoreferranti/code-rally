@@ -241,6 +241,9 @@ class GameEngine:
         # Handle collisions with obstacles
         self._handle_obstacle_collision(player)
 
+        # Handle collisions with track boundaries
+        self._handle_boundary_collision(player)
+
     def _get_surface_at_position(self, position: Vector2) -> str:
         """
         Determine the surface type at a position.
@@ -295,19 +298,54 @@ class GameEngine:
         Returns:
             True if on track, False if off-track
         """
-        # Simple implementation: check distance to nearest segment
-        # A more sophisticated version would check if within track width
         min_dist = float('inf')
+        closest_segment = None
 
+        # Find the closest point on any track segment
         for segment in self.state.track.segments:
-            dx = position.x - segment.start.x
-            dy = position.y - segment.start.y
-            dist = (dx * dx + dy * dy) ** 0.5
-            min_dist = min(min_dist, dist)
+            # Sample points along the segment
+            num_samples = 20 if segment.control1 else 5
 
-        # Consider on-track if within reasonable distance
-        # This is simplified - proper implementation would use track width
-        return min_dist < 200.0
+            for i in range(num_samples + 1):
+                t = i / num_samples
+
+                # Get point on track centerline
+                if segment.is_straight():
+                    x = segment.start.x + t * (segment.end.x - segment.start.x)
+                    y = segment.start.y + t * (segment.end.y - segment.start.y)
+                else:
+                    # For curves, we need to import the bezier calculation
+                    import math
+                    # Cubic bezier formula
+                    mt = 1 - t
+                    mt2 = mt * mt
+                    mt3 = mt2 * mt
+                    t2 = t * t
+                    t3 = t2 * t
+
+                    p0 = (segment.start.x, segment.start.y)
+                    p1 = segment.control1
+                    p2 = segment.control2
+                    p3 = (segment.end.x, segment.end.y)
+
+                    x = mt3 * p0[0] + 3 * mt2 * t * p1[0] + 3 * mt * t2 * p2[0] + t3 * p3[0]
+                    y = mt3 * p0[1] + 3 * mt2 * t * p1[1] + 3 * mt * t2 * p2[1] + t3 * p3[1]
+
+                # Distance from car to this track point
+                dx = position.x - x
+                dy = position.y - y
+                dist = (dx * dx + dy * dy) ** 0.5
+
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_segment = segment
+
+        # On-track if within half the track width
+        if closest_segment:
+            track_half_width = closest_segment.start.width / 2
+            return min_dist <= track_half_width
+
+        return False
 
     def _handle_obstacle_collision(self, player: PlayerState) -> None:
         """
@@ -349,6 +387,80 @@ class GameEngine:
 
                 # Push car out of obstacle
                 player.car.position = player.car.position + (normal * penetration)
+
+    def _handle_boundary_collision(self, player: PlayerState) -> None:
+        """
+        Handle collision with track containment boundaries.
+
+        Args:
+            player: Player to check for boundary collisions
+        """
+        if not self.state.track.containment:
+            return
+
+        car_radius = 10.0  # TODO: Make configurable
+
+        # Check both left and right boundaries
+        for boundary_points in [self.state.track.containment.left_points,
+                                 self.state.track.containment.right_points]:
+            # Check each boundary segment
+            for i in range(len(boundary_points) - 1):
+                p1_x, p1_y = boundary_points[i]
+                p2_x, p2_y = boundary_points[i + 1]
+
+                # Find closest point on line segment to car
+                car_x = player.car.position.x
+                car_y = player.car.position.y
+
+                # Vector from p1 to p2
+                seg_dx = p2_x - p1_x
+                seg_dy = p2_y - p1_y
+                seg_length_sq = seg_dx * seg_dx + seg_dy * seg_dy
+
+                if seg_length_sq == 0:
+                    # Degenerate segment, just use p1
+                    closest_x, closest_y = p1_x, p1_y
+                else:
+                    # Parameter t for projection onto line segment
+                    # t = 0 means p1, t = 1 means p2
+                    t = max(0, min(1, ((car_x - p1_x) * seg_dx + (car_y - p1_y) * seg_dy) / seg_length_sq))
+
+                    # Closest point on segment
+                    closest_x = p1_x + t * seg_dx
+                    closest_y = p1_y + t * seg_dy
+
+                # Distance from car to closest point
+                dx = car_x - closest_x
+                dy = car_y - closest_y
+                distance = (dx * dx + dy * dy) ** 0.5
+
+                # Check if car is colliding with this boundary segment
+                if distance < car_radius:
+                    # Calculate collision normal (away from wall)
+                    if distance > 0:
+                        normal = Vector2(dx / distance, dy / distance)
+                    else:
+                        # Car is exactly on the wall, use perpendicular to segment
+                        seg_length = seg_length_sq ** 0.5
+                        if seg_length > 0:
+                            # Perpendicular to segment (pointing away from track)
+                            normal = Vector2(-seg_dy / seg_length, seg_dx / seg_length)
+                        else:
+                            normal = Vector2(1, 0)
+
+                    penetration = car_radius - distance
+
+                    # Apply elastic bounce
+                    velocity_dot_normal = player.car.velocity.dot(normal)
+
+                    # Only bounce if moving into wall
+                    if velocity_dot_normal < 0:
+                        elasticity = self.settings.physics.COLLISION_ELASTICITY
+                        bounce = normal * (-(1 + elasticity) * velocity_dot_normal)
+                        player.car.velocity = player.car.velocity + bounce
+
+                    # Push car out of wall
+                    player.car.position = player.car.position + (normal * penetration)
 
     def _check_checkpoint_progress(self, player: PlayerState) -> None:
         """

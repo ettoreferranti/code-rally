@@ -228,7 +228,11 @@ async def game_websocket(
                             'type': obs.type
                         }
                         for obs in (engine.state.track.obstacles or [])
-                    ]
+                    ],
+                    'containment': {
+                        'left_points': [list(p) for p in engine.state.track.containment.left_points],
+                        'right_points': [list(p) for p in engine.state.track.containment.right_points]
+                    } if engine.state.track.containment else None
                 }
             }
         })

@@ -177,8 +177,7 @@ class TrackGenerator:
         finish_pos, finish_heading = self._get_finish_position(segments)
 
         # Generate containment boundaries (outer collision walls)
-        # DISABLED FOR NOW - geometric issues with curve offsetting
-        containment = None  # self._generate_containment_boundaries(segments)
+        containment = self._generate_containment_boundaries(segments)
 
         # Generate obstacles in off-road areas
         obstacles = self._generate_obstacles(segments, containment)
@@ -607,91 +606,79 @@ class TrackGenerator:
         """
         Generate containment boundaries (outer collision walls) around the track.
 
-        Uses a simplified approach: create boundaries at segment endpoints only
-        to avoid self-intersections on curves.
+        Uses a simple rectangular approach: find the bounding box of all track points
+        and create a rectangle with some padding.
 
         Args:
             segments: List of track segments
 
         Returns:
-            ContainmentBoundary with left and right wall points
+            ContainmentBoundary with left and right wall points forming a rectangle
         """
-        left_points = []
-        right_points = []
+        # Collect all track points to find bounding box
+        all_points = []
 
-        distance_multiplier = self.config.CONTAINMENT_DISTANCE
+        for segment in segments:
+            # Add start point
+            all_points.append((segment.start.x, segment.start.y))
 
-        # Process each segment endpoint
-        for seg_idx, segment in enumerate(segments):
-            # Start point
-            x = segment.start.x
-            y = segment.start.y
+            # Sample curve points if it's a bezier curve
+            if not segment.is_straight():
+                for i in range(10):
+                    t = i / 10
+                    x, y = self._bezier_point(
+                        (segment.start.x, segment.start.y),
+                        segment.control1,
+                        segment.control2,
+                        (segment.end.x, segment.end.y),
+                        t
+                    )
+                    all_points.append((x, y))
 
-            # Calculate direction at start
-            if segment.control1:
-                # Use control point for direction
-                dx = segment.control1[0] - segment.start.x
-                dy = segment.control1[1] - segment.start.y
-            else:
-                # Straight segment
-                dx = segment.end.x - segment.start.x
-                dy = segment.end.y - segment.start.y
+        # Add last segment end point
+        all_points.append((segments[-1].end.x, segments[-1].end.y))
 
-            # Normalize
-            length = math.sqrt(dx**2 + dy**2)
-            if length > 0:
-                dx /= length
-                dy /= length
+        # Find bounding box
+        min_x = min(p[0] for p in all_points)
+        max_x = max(p[0] for p in all_points)
+        min_y = min(p[1] for p in all_points)
+        max_y = max(p[1] for p in all_points)
 
-            # Perpendicular normal (left side)
-            normal_x = -dy
-            normal_y = dx
+        # Add padding (track width + containment offset)
+        padding = self.config.STAGE_WIDTH / 2 + self.config.CONTAINMENT_OFFSET
 
-            track_half_width = segment.start.width / 2
-            off_road_distance = track_half_width * distance_multiplier
-            total_distance_from_center = track_half_width + off_road_distance
+        min_x -= padding
+        max_x += padding
+        min_y -= padding
+        max_y += padding
 
-            # Create boundary points
-            left_x = x + normal_x * total_distance_from_center
-            left_y = y + normal_y * total_distance_from_center
-            right_x = x - normal_x * total_distance_from_center
-            right_y = y - normal_y * total_distance_from_center
+        # Create rectangular boundary
+        # Split into left wall + bottom, and right wall + top
+        # This avoids diagonal lines crossing the track
 
-            left_points.append((left_x, left_y))
-            right_points.append((right_x, right_y))
+        # Left wall (vertical) + Bottom wall (horizontal)
+        left_points = [
+            (min_x, min_y),  # Bottom-left corner
+            (min_x, max_y),  # Top-left corner
+        ]
 
-        # Add final endpoint
-        last_segment = segments[-1]
-        x = last_segment.end.x
-        y = last_segment.end.y
+        # Add bottom wall separately
+        left_points.extend([
+            (min_x, min_y),  # Bottom-left corner (restart)
+            (max_x, min_y),  # Bottom-right corner
+        ])
 
-        # Direction at end
-        if last_segment.control2:
-            dx = last_segment.end.x - last_segment.control2[0]
-            dy = last_segment.end.y - last_segment.control2[1]
-        else:
-            dx = last_segment.end.x - last_segment.start.x
-            dy = last_segment.end.y - last_segment.start.y
+        # Right wall (vertical) + Top wall (horizontal)
+        right_points = [
+            (max_x, min_y),  # Bottom-right corner
+            (max_x, max_y),  # Top-right corner
+        ]
 
-        length = math.sqrt(dx**2 + dy**2)
-        if length > 0:
-            dx /= length
-            dy /= length
-
-        normal_x = -dy
-        normal_y = dx
-
-        track_half_width = last_segment.end.width / 2
-        off_road_distance = track_half_width * distance_multiplier
-        total_distance_from_center = track_half_width + off_road_distance
-
-        left_x = x + normal_x * total_distance_from_center
-        left_y = y + normal_y * total_distance_from_center
-        right_x = x - normal_x * total_distance_from_center
-        right_y = y - normal_y * total_distance_from_center
-
-        left_points.append((left_x, left_y))
-        right_points.append((right_x, right_y))
+        # Add top wall separately
+        right_points.extend([
+            (min_x, max_y),  # Top-left corner
+            (max_x, max_y),  # Top-right corner
+        ])
 
         return ContainmentBoundary(
             left_points=left_points,
@@ -871,4 +858,57 @@ class TrackGenerator:
                 type=obstacle_type
             ))
 
-        return obstacles
+        # Filter out obstacles that intersect with the track
+        filtered_obstacles = []
+        for obstacle in obstacles:
+            if not self._obstacle_intersects_track(obstacle, segments):
+                filtered_obstacles.append(obstacle)
+
+        return filtered_obstacles
+
+    def _obstacle_intersects_track(self, obstacle: Obstacle, segments: List[TrackSegment]) -> bool:
+        """
+        Check if an obstacle intersects with any track segment.
+
+        Args:
+            obstacle: Obstacle to check
+            segments: List of track segments
+
+        Returns:
+            True if obstacle intersects track, False otherwise
+        """
+        obs_x, obs_y = obstacle.position
+        obs_radius = obstacle.radius
+
+        for segment in segments:
+            # Sample points along the segment to check for intersection
+            num_samples = 20 if not segment.is_straight() else 5
+
+            for i in range(num_samples + 1):
+                t = i / num_samples
+
+                # Get point on track centerline
+                if segment.is_straight():
+                    x = segment.start.x + t * (segment.end.x - segment.start.x)
+                    y = segment.start.y + t * (segment.end.y - segment.start.y)
+                else:
+                    x, y = self._bezier_point(
+                        (segment.start.x, segment.start.y),
+                        segment.control1,
+                        segment.control2,
+                        (segment.end.x, segment.end.y),
+                        t
+                    )
+
+                # Distance from obstacle center to track point
+                dx = obs_x - x
+                dy = obs_y - y
+                distance = math.sqrt(dx * dx + dy * dy)
+
+                # Check if obstacle overlaps with track
+                # Track has width/2 radius, obstacle has its radius
+                track_radius = segment.start.width / 2
+                if distance < (obs_radius + track_radius):
+                    return True  # Obstacle intersects track
+
+        return False  # No intersection

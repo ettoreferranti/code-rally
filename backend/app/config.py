@@ -36,6 +36,7 @@ class GameConfig:
     FINISH_GRACE_PERIOD: int = 30  # Seconds after first finisher before DNF
 
     # Containment boundaries (outer walls that cars collide with)
+    CONTAINMENT_OFFSET: float = 350.0  # Constant distance from track edge to wall (in units)
     CONTAINMENT_DISTANCE: float = 1.0  # Fixed distance from track edge (multiplier of track width) - for testing
     CONTAINMENT_MIN_DISTANCE: float = 0.5  # Minimum distance from track edge (multiplier of track width)
     CONTAINMENT_MAX_DISTANCE: float = 2.0  # Maximum distance from track edge (multiplier of track width)
@@ -44,10 +45,10 @@ class GameConfig:
     BOTTLENECK_DISTANCE: float = 0.3  # Containment distance multiplier for bottlenecks (tight squeeze, min from track edge)
 
     # Obstacles (rocks, trees, buildings in off-road areas)
-    OBSTACLE_DENSITY: float = 0.02  # Average obstacles per 1000 square units of off-road area
+    OBSTACLE_DENSITY: float = 0.15  # Average obstacles per 1000 square units of off-road area
     OBSTACLE_MIN_RADIUS: float = 5.0  # Minimum obstacle size
     OBSTACLE_MAX_RADIUS: float = 20.0  # Maximum obstacle size
-    OBSTACLE_MIN_DISTANCE_FROM_TRACK: float = 30.0  # Minimum distance from track centerline
+    OBSTACLE_MIN_DISTANCE_FROM_TRACK: float = 120.0  # Minimum distance from track centerline (must be > half track width)
     OBSTACLE_TYPES: tuple = ('rock', 'tree', 'building')  # Available obstacle types
 
     # Surface distribution (probabilities)

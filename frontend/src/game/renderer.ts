@@ -232,13 +232,13 @@ export function renderTrack(ctx: CanvasRenderingContext2D, track: Track): void {
   // Draw containment boundaries first (background)
   renderContainment(ctx, track);
 
-  // Draw obstacles
-  renderObstacles(ctx, track);
-
   // Draw all segments
   for (const segment of track.segments) {
     renderSegment(ctx, segment);
   }
+
+  // Draw obstacles AFTER track so they're visible
+  renderObstacles(ctx, track);
 
   // Draw checkpoints
   ctx.strokeStyle = '#ff0000';

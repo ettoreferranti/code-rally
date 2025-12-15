@@ -33,7 +33,9 @@
       "Bash(/Users/ettore/Library/Mobile\\ Documents/com~apple~CloudDocs/Code/code-rally/backend/venv/bin/python:*)",
       "Bash(gh issue create:*)",
       "Bash(./run_dev.sh:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(find:*)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []
