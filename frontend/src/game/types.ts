@@ -75,7 +75,9 @@ export interface RaceInfo {
   totalCheckpoints: number;
   isFinished: boolean;
   finishTime: number | null;  // Time in seconds when finished
-  startTime: number;  // Time in seconds when race started
+  startTime: number | null;  // Time in seconds when race started
+  countdownRemaining?: number;  // Countdown seconds remaining before race starts
+  raceStatus?: string;  // Race status: 'waiting', 'countdown', 'racing', 'finished'
 }
 
 export interface GameState {

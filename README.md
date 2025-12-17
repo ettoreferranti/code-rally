@@ -66,27 +66,31 @@ cd frontend && npm run dev
 class MyBot:
     def __init__(self):
         self.name = "My First Bot"
-    
+
     def on_tick(self, state):
-        # state contains: position, speed, heading, track_info, opponents, etc.
-        
+        # state contains: car position, speed, heading, track info, opponents, etc.
+
         # Simple logic: accelerate and follow the track
         actions = {
             "accelerate": True,
             "brake": False,
-            "turn_left": state.track_info.next_turn == "left",
-            "turn_right": state.track_info.next_turn == "right",
+            "turn_left": state.track.upcoming_turn == "left",
+            "turn_right": state.track.upcoming_turn == "right",
             "use_nitro": False
         }
         return actions
-    
+
     def on_collision(self, event):
-        # React to collisions
+        # React to collisions (with cars, obstacles, or boundaries)
         pass
-    
-    def on_lap_complete(self, lap_number):
-        # Called when completing a lap
-        pass
+
+    def on_checkpoint(self, checkpoint_index, split_time):
+        # Called when passing each checkpoint
+        print(f"Checkpoint {checkpoint_index} at {split_time:.2f}s")
+
+    def on_finish(self, finish_time, final_position):
+        # Called when crossing the finish line
+        print(f"Finished in {final_position} place! Time: {finish_time:.2f}s")
 ```
 
 See [Bot API Guide](docs/bot-api.md) for full documentation.

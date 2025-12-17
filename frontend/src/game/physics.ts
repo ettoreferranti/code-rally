@@ -10,19 +10,27 @@ import { SurfaceType as SurfaceTypeEnum } from './types';
 import { isOnTrack, checkBoundaryCollision, checkObstacleCollision } from './trackUtils';
 
 /**
- * Physics constants - tuned for responsive arcade-style controls.
+ * Physics constants - synchronized with backend configuration.
+ *
+ * IMPORTANT: These values MUST match backend/app/config.py PhysicsConfig.
+ * Values tuned for responsive arcade-style gameplay.
+ *
+ * For multiplayer mode, the backend is authoritative and runs physics server-side.
+ * For single-player mode, the frontend runs physics locally using these constants.
+ *
+ * Backend exposes these via GET /config/physics endpoint for runtime synchronization.
  */
 const PHYSICS_CONFIG = {
-  // Movement
-  MAX_SPEED: 300.0,  // units/second (50% increase for more speed!)
-  ACCELERATION: 250.0,  // units/second^2 (increased for faster acceleration)
-  BRAKE_FORCE: 250.0,  // units/second^2 (increased to match higher speeds)
-  DRAG_COEFFICIENT: 0.5,  // Increased to slow down when not accelerating
+  // Movement (arcade-style, responsive)
+  MAX_SPEED: 300.0,  // units/second
+  ACCELERATION: 250.0,  // units/second^2
+  BRAKE_FORCE: 250.0,  // units/second^2
+  DRAG_COEFFICIENT: 0.5,  // Drag when coasting
   THROTTLE_RESPONSE: 20.0,  // How quickly throttle ramps up/down (0-1 per second)
 
   // Turning
-  TURN_RATE: 4.5,  // radians/second (increased by 50% for better turning)
-  MIN_TURN_SPEED: 1.0,  // Reduced so you can turn at lower speeds
+  TURN_RATE: 4.5,  // radians/second
+  MIN_TURN_SPEED: 1.0,  // Minimum speed to turn effectively
   TURN_ACCELERATION: 20.0,  // How quickly angular velocity ramps up/down
 
   // Grip and drift
@@ -31,7 +39,7 @@ const PHYSICS_CONFIG = {
   GRIP_GRAVEL: 0.5,
   GRIP_ICE: 0.25,
   DRIFT_THRESHOLD: 0.8,  // Higher threshold = less drifting
-  DRIFT_RECOVERY_RATE: 15.0,  // Much stronger grip to kill lateral momentum faster
+  DRIFT_RECOVERY_RATE: 15.0,  // Strong grip to kill lateral momentum
 
   // Off-track penalties
   OFF_TRACK_SPEED_MULTIPLIER: 0.5,  // Speed reduction when off-track

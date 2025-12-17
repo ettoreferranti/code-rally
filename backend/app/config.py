@@ -60,32 +60,37 @@ class GameConfig:
 
 @dataclass
 class PhysicsConfig:
-    """Physics simulation parameters."""
-    # Movement
-    MAX_SPEED: float = 150.0  # units/second (base, before upgrades)
-    ACCELERATION: float = 80.0  # units/second^2
-    BRAKE_FORCE: float = 120.0  # units/second^2
-    DRAG_COEFFICIENT: float = 0.02
-    
+    """Physics simulation parameters (arcade-style, synchronized with frontend)."""
+    # Movement (tuned for responsive, arcade-style gameplay)
+    MAX_SPEED: float = 300.0  # units/second (base, before upgrades)
+    ACCELERATION: float = 250.0  # units/second^2
+    BRAKE_FORCE: float = 250.0  # units/second^2
+    DRAG_COEFFICIENT: float = 0.5  # Increased to slow down when coasting
+
     # Turning
-    TURN_RATE: float = 3.0  # radians/second
-    MIN_TURN_SPEED: float = 5.0  # Minimum speed to turn effectively
-    
+    TURN_RATE: float = 4.5  # radians/second (responsive turning)
+    MIN_TURN_SPEED: float = 1.0  # Minimum speed to turn effectively
+    TURN_ACCELERATION: float = 20.0  # How quickly angular velocity ramps up/down
+
+    # Throttle response (smooth acceleration)
+    THROTTLE_RESPONSE: float = 20.0  # How quickly throttle ramps up/down (0-1 per second)
+
     # Grip and drift
     GRIP_ASPHALT: float = 1.0
     GRIP_WET: float = 0.7
     GRIP_GRAVEL: float = 0.5
     GRIP_ICE: float = 0.25
-    DRIFT_THRESHOLD: float = 0.6  # Grip ratio to start drifting
-    DRIFT_RECOVERY_RATE: float = 2.0
-    
+    DRIFT_THRESHOLD: float = 0.8  # Higher threshold = less drifting
+    DRIFT_RECOVERY_RATE: float = 15.0  # Strong grip to kill lateral momentum faster
+
     # Off-track penalty
     OFF_TRACK_SPEED_MULTIPLIER: float = 0.5
     OFF_TRACK_GRIP_MULTIPLIER: float = 0.3
-    
+
     # Collisions (elastic)
     COLLISION_ELASTICITY: float = 0.7
-    COLLISION_MIN_SPEED: float = 10.0  # Minimum impact speed
+    COLLISION_MIN_SPEED: float = 5.0  # Minimum impact speed (lowered for better feel)
+    CAR_RADIUS: float = 10.0  # Car radius for collision detection
 
 
 @dataclass

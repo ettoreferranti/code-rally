@@ -1,5 +1,9 @@
 # CodeRally Architecture
 
+> **Implementation Status**: This document describes the complete target architecture.
+> Components marked with ✅ are implemented, 🔄 are partially implemented, and 📋 are planned.
+> See "Implementation Status" sections throughout for current state.
+
 ## System Overview
 
 CodeRally is a client-server web application with real-time multiplayer capabilities.
@@ -43,40 +47,54 @@ CodeRally is a client-server web application with real-time multiplayer capabili
 ```
 backend/
 ├── app/
-│   ├── api/              # REST and WebSocket endpoints
-│   │   ├── routes/       # Route definitions
-│   │   ├── websocket.py  # WebSocket handler
-│   │   └── deps.py       # Dependencies
+│   ├── api/              # REST and WebSocket endpoints ✅
+│   │   ├── routes/       # Route definitions ✅
+│   │   │   ├── health.py    # Health checks ✅
+│   │   │   ├── config.py    # Configuration API ✅
+│   │   │   ├── tracks.py    # Track generation ✅
+│   │   │   └── game.py      # WebSocket game API ✅
 │   │
-│   ├── core/             # Game engine
-│   │   ├── engine.py     # Main game loop
-│   │   ├── physics.py    # Physics simulation
-│   │   ├── track.py      # Track generation
-│   │   ├── car.py        # Car model
-│   │   └── collision.py  # Collision detection
+│   ├── core/             # Game engine ✅
+│   │   ├── engine.py     # Main game loop ✅
+│   │   ├── physics.py    # Physics simulation ✅
+│   │   └── track.py      # Track generation ✅
 │   │
-│   ├── models/           # Database models
-│   │   ├── user.py
-│   │   ├── car.py
-│   │   ├── bot.py
-│   │   └── race.py
+│   ├── models/           # Database models 📋 (Planned for M5)
+│   │   ├── user.py       # 📋 Not yet implemented
+│   │   ├── car.py        # 📋 Not yet implemented
+│   │   ├── bot.py        # 📋 Not yet implemented
+│   │   └── race.py       # 📋 Not yet implemented
 │   │
-│   ├── services/         # Business logic
-│   │   ├── auth.py       # Authentication
-│   │   ├── garage.py     # Car management
-│   │   ├── race.py       # Race management
-│   │   └── leaderboard.py
+│   ├── services/         # Business logic 📋 (Planned for M4-M5)
+│   │   ├── auth.py       # 📋 Authentication
+│   │   ├── garage.py     # 📋 Car management
+│   │   ├── race.py       # 📋 Race management
+│   │   └── leaderboard.py # 📋 Leaderboard
 │   │
-│   ├── bot_runtime/      # Sandboxed execution
-│   │   ├── sandbox.py    # RestrictedPython setup
-│   │   ├── api.py        # Bot API interface
-│   │   └── validator.py  # Code validation
+│   ├── bot_runtime/      # Sandboxed execution 📋 (Planned for M3)
+│   │   ├── sandbox.py    # 📋 RestrictedPython setup
+│   │   ├── api.py        # 📋 Bot API interface
+│   │   └── validator.py  # 📋 Code validation
 │   │
-│   └── config.py         # Configuration
+│   ├── config.py         # Configuration ✅
+│   └── database.py       # Database setup ✅
 │
-├── tests/
-└── main.py               # Application entry point
+├── tests/                # Test suite 🔄 (Partial coverage)
+│   ├── test_physics.py   # ✅ Comprehensive
+│   ├── test_track.py     # ✅ Comprehensive
+│   └── test_health.py    # ✅ Basic
+└── main.py               # Application entry point ✅
 ```
+
+### Implementation Status Summary
+
+| Milestone | Components | Status |
+|-----------|-----------|--------|
+| M1: Foundation | Core physics, track generation, rendering | ✅ Complete |
+| M2: Racing | Collisions, checkpoints, surfaces, HUD | 🔄 70% Complete |
+| M3: Bot Framework | RestrictedPython sandbox, bot API | 📋 Planned |
+| M4: Multiplayer | WebSocket (basic), state sync | 🔄 30% Complete |
+| M5: Progression | User system, garage, database models | 📋 Planned |
 
 ### Game Engine
 
@@ -222,31 +240,53 @@ CREATE TABLE race_results (
 
 ```
 frontend/src/
-├── components/
-│   ├── common/           # Shared UI components
-│   ├── lobby/            # Race lobby, matchmaking
-│   ├── garage/           # Car selection, upgrades
-│   ├── leaderboard/      # Rankings
-│   └── auth/             # Login, registration
+├── components/           # UI Components 🔄
+│   ├── Layout.tsx        # ✅ Navigation and layout
+│   ├── RaceHUD.tsx       # ✅ Race progress display
+│   ├── lobby/            # 📋 Race lobby (planned M4)
+│   ├── garage/           # 📋 Car selection (planned M5)
+│   ├── leaderboard/      # 📋 Rankings (planned M5)
+│   └── auth/             # 📋 Login, registration (planned M5)
 │
-├── game/
-│   ├── GameCanvas.jsx    # Main rendering
-│   ├── renderer.js       # Canvas drawing
-│   ├── input.js          # Keyboard handling
-│   └── interpolation.js  # Smooth state updates
+├── game/                 # Game Engine ✅
+│   ├── GameCanvas.tsx    # ✅ Main rendering component
+│   ├── renderer.ts       # ✅ Canvas drawing with camera system
+│   ├── physics.ts        # ✅ Car physics simulation
+│   ├── types.ts          # ✅ TypeScript interfaces
+│   ├── useGameLoop.ts    # ✅ Fixed timestep game loop
+│   ├── useKeyboardInput.ts # ✅ Keyboard handling
+│   ├── trackUtils.ts     # ✅ Track collision/surface detection
+│   └── checkpointUtils.ts # ✅ Checkpoint detection
 │
-├── editor/
-│   ├── BotEditor.jsx     # Monaco wrapper
-│   ├── templates.js      # Starter bot templates
-│   └── debugger.js       # Debug visualisation
+├── editor/               # Bot Editor 📋 (Planned M3)
+│   └── .gitkeep          # 📋 Monaco editor integration planned
 │
-├── services/
-│   ├── api.js            # REST API client
-│   ├── websocket.js      # WebSocket manager
-│   └── auth.js           # Auth state
+├── pages/                # Application Pages 🔄
+│   ├── Home.tsx          # ✅ Landing page
+│   ├── Race.tsx          # ✅ Single-player mode
+│   ├── MultiplayerRace.tsx # ✅ Multiplayer mode
+│   └── Editor.tsx        # 📋 Placeholder (Monaco not integrated)
 │
-└── App.jsx
+├── services/             # API Clients ✅
+│   ├── trackApi.ts       # ✅ Track generation API
+│   └── gameWebSocket.ts  # ✅ WebSocket with reconnection
+│
+└── App.tsx               # ✅ React Router setup
 ```
+
+### Frontend Implementation Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Canvas Rendering | ✅ Complete | Track, cars, obstacles, checkpoints |
+| Physics Engine | ✅ Complete | Synchronized with backend config |
+| Keyboard Input | ✅ Complete | WASD + arrows + space |
+| WebSocket Client | ✅ Complete | Reconnection logic included |
+| Single-Player Mode | ✅ Complete | Local physics simulation |
+| Multiplayer Mode | 🔄 Functional | Basic state sync working |
+| Race HUD | ✅ Complete | Checkpoint progress, timer, warnings |
+| Monaco Editor | 📋 Planned | For M3 bot programming |
+| User Auth UI | 📋 Planned | For M5 progression system |
 
 ### Rendering Pipeline
 
@@ -300,6 +340,25 @@ class Settings:
     # Database
     DATABASE_URL = "sqlite:///./coderally.db"
 ```
+
+### Configuration API ✅
+
+Physics constants are exposed via REST API for frontend synchronization:
+
+**GET /config/physics**
+```json
+{
+  "MAX_SPEED": 300.0,
+  "ACCELERATION": 250.0,
+  "BRAKE_FORCE": 250.0,
+  "DRAG_COEFFICIENT": 0.5,
+  "TURN_RATE": 4.5,
+  ...
+}
+```
+
+This ensures frontend and backend physics remain synchronized, critical for
+multiplayer mode where server is authoritative.
 
 ## Security Considerations
 

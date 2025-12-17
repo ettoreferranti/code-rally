@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { GameCanvas, useKeyboardInput } from '../game';
 import type { GameState, Track } from '../game/types';
 import { RaceHUD } from '../components/RaceHUD';
+import { CountdownOverlay } from '../components/CountdownOverlay';
 import { GameWebSocketClient, type GameStateMessage } from '../services';
 
 export default function MultiplayerRace() {
@@ -84,6 +85,7 @@ export default function MultiplayerRace() {
             finishTime: playerData.finish_time,
             startTime: state.race_info.start_time,
             countdownRemaining: state.race_info.countdown_remaining,
+            raceStatus: state.race_info.status,
           }
         };
 
@@ -128,8 +130,13 @@ export default function MultiplayerRace() {
 
     console.log('Setting up input interval at 60 FPS');
 
-    // Send inputs at 60 FPS
+    // Send inputs at 60 FPS (but only during racing, not during countdown)
     inputIntervalRef.current = window.setInterval(() => {
+      // Don't send inputs during countdown or waiting
+      if (gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'waiting') {
+        return;
+      }
+
       // Only log when there's actual input
       if (inputState.accelerate || inputState.brake || inputState.turnLeft || inputState.turnRight || inputState.nitro) {
         console.log('Sending input:', inputState);
@@ -142,7 +149,7 @@ export default function MultiplayerRace() {
         clearInterval(inputIntervalRef.current);
       }
     };
-  }, [inputState]);
+  }, [inputState, gameState?.raceInfo.raceStatus]);
 
   const handleStartRace = () => {
     console.log('Start Race clicked');
@@ -210,13 +217,23 @@ export default function MultiplayerRace() {
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
         <GameCanvas gameState={gameState} width={800} height={600} />
         {gameState && <RaceHUD raceInfo={gameState.raceInfo} car={gameState.cars[0]} />}
+        {gameState && gameState.raceInfo.countdownRemaining !== undefined && (
+          <CountdownOverlay
+            countdown={gameState.raceInfo.countdownRemaining}
+            isVisible={gameState.raceInfo.raceStatus === 'countdown'}
+          />
+        )}
       </div>
 
       {/* Keyboard Input Display */}
       <div className="mt-4 bg-gray-800 p-4 rounded-lg">
         <h3 className="text-lg font-semibold mb-3">Keyboard Controls (Sent to Server)</h3>
         <p className="text-sm text-gray-400 mb-3">
-          Inputs are sent to server at 60 FPS
+          {gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'waiting' ? (
+            <span className="text-yellow-400 font-semibold">🔒 Controls locked during countdown</span>
+          ) : (
+            <span>Inputs are sent to server at 60 FPS</span>
+          )}
         </p>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className={`p-3 rounded text-center transition-colors ${
