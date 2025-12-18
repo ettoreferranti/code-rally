@@ -217,10 +217,12 @@ export default function MultiplayerRace() {
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
         <GameCanvas gameState={gameState} width={800} height={600} />
         {gameState && <RaceHUD raceInfo={gameState.raceInfo} car={gameState.cars[0]} />}
-        {gameState && gameState.raceInfo.countdownRemaining !== undefined && (
+        {gameState && (
           <CountdownOverlay
             countdown={gameState.raceInfo.countdownRemaining}
             isVisible={gameState.raceInfo.raceStatus === 'countdown'}
+            raceStatus={gameState.raceInfo.raceStatus}
+            isFinished={gameState.raceInfo.isFinished}
           />
         )}
       </div>

@@ -11,11 +11,32 @@ interface RaceHUDProps {
 }
 
 export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
-  const elapsedTime = raceInfo.finishTime !== null
-    ? raceInfo.finishTime
-    : (Date.now() / 1000) - raceInfo.startTime;
+  // Calculate elapsed time correctly based on race state
+  const calculateElapsedTime = (): number => {
+    // If race finished, calculate elapsed time from start to finish
+    if (raceInfo.isFinished && raceInfo.finishTime !== null && raceInfo.startTime) {
+      // finishTime and startTime are both absolute timestamps
+      // Calculate the elapsed time between them
+      return raceInfo.finishTime - raceInfo.startTime;
+    }
+
+    // If race hasn't started yet, show 0
+    if (!raceInfo.startTime || raceInfo.raceStatus === 'waiting' || raceInfo.raceStatus === 'countdown') {
+      return 0;
+    }
+
+    // Race is in progress, calculate elapsed time
+    return (Date.now() / 1000) - raceInfo.startTime;
+  };
+
+  const elapsedTime = calculateElapsedTime();
 
   const formatTime = (seconds: number): string => {
+    // Ensure seconds is a valid number
+    if (!isFinite(seconds) || seconds < 0) {
+      return '0:00.00';
+    }
+
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     const ms = Math.floor((seconds % 1) * 100);
