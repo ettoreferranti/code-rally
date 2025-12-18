@@ -316,6 +316,29 @@ export function renderCar(
     ctx.stroke();
   }
 
+  // Draw nitro effect if active
+  if (car.nitro_active) {
+    // Purple glow effect
+    ctx.shadowColor = '#8A2BE2';
+    ctx.shadowBlur = 20;
+    ctx.strokeStyle = '#DA70D6';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, 28, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Reset shadow
+    ctx.shadowBlur = 0;
+
+    // Add trailing particles effect (simplified)
+    ctx.fillStyle = 'rgba(138, 43, 226, 0.4)';
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(-width / 2 - 10 - i * 8, 0, 3 - i, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   ctx.restore();
 }
 

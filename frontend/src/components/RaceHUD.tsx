@@ -157,6 +157,31 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
           ⏱️ GRACE PERIOD: {Math.ceil(raceInfo.gracePeriodRemaining)}s
         </div>
       )}
+
+      {/* Nitro Indicator */}
+      {car && !raceInfo.isFinished && (
+        <div
+          style={{
+            marginTop: '15px',
+            padding: '10px',
+            backgroundColor: car.nitro_active ? 'rgba(138, 43, 226, 0.4)' : 'rgba(0, 0, 0, 0.5)',
+            borderRadius: '4px',
+            textAlign: 'center',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            color: car.nitro_active ? '#DA70D6' : 'white',
+            border: car.nitro_active ? '2px solid rgba(138, 43, 226, 0.8)' : '2px solid rgba(255, 255, 255, 0.3)',
+            transition: 'all 0.2s',
+          }}
+        >
+          <div>🚀 NITRO: {car.nitro_charges}</div>
+          {car.nitro_active && (
+            <div style={{ fontSize: '11px', marginTop: '4px', color: '#FFD700' }}>
+              ACTIVE! ({(car.nitro_remaining_ticks / 60).toFixed(1)}s)
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

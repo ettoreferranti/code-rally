@@ -68,6 +68,9 @@ export interface CarState {
   drift_angle: number;
   throttle: number;  // Current throttle level (0-1) for smooth acceleration
   is_off_track: boolean;  // Whether car is currently off-track
+  nitro_charges: number;  // Number of nitro boosts remaining
+  nitro_active: boolean;  // Whether nitro is currently active
+  nitro_remaining_ticks: number;  // Ticks remaining for current nitro boost
 }
 
 export interface RaceInfo {

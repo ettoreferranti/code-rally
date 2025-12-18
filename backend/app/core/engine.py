@@ -116,7 +116,10 @@ class GameEngine:
             position=Vector2(start_x, start_y),
             velocity=Vector2(0, 0),
             heading=self.state.track.start_heading,
-            angular_velocity=0.0
+            angular_velocity=0.0,
+            nitro_charges=self.settings.car.DEFAULT_NITRO_CHARGES,
+            nitro_active=False,
+            nitro_remaining_ticks=0
         )
 
         player = PlayerState(
@@ -166,6 +169,11 @@ class GameEngine:
             player.car.is_drifting = False
             player.car.drift_angle = 0
             player.car.throttle = 0
+
+            # Reset nitro
+            player.car.nitro_charges = self.settings.car.DEFAULT_NITRO_CHARGES
+            player.car.nitro_active = False
+            player.car.nitro_remaining_ticks = 0
 
             # Reset race progress
             player.current_checkpoint = 0
@@ -283,7 +291,8 @@ class GameEngine:
             braking=player.input.brake,
             turn_direction=turn_direction,
             dt=self.tick_interval,
-            grip_coefficient=grip
+            grip_coefficient=grip,
+            use_nitro=player.input.nitro
         )
 
         # Handle collisions with obstacles
@@ -682,6 +691,9 @@ class GameEngine:
                         'angular_velocity': player.car.angular_velocity,
                         'is_drifting': player.car.is_drifting,
                         'drift_angle': player.car.drift_angle,
+                        'nitro_charges': player.car.nitro_charges,
+                        'nitro_active': player.car.nitro_active,
+                        'nitro_remaining_ticks': player.car.nitro_remaining_ticks,
                     },
                     'current_checkpoint': player.current_checkpoint,
                     'is_finished': player.is_finished,

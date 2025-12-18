@@ -27,6 +27,9 @@ export interface GameStateMessage {
           angular_velocity: number;
           is_drifting: boolean;
           drift_angle: number;
+          nitro_charges: number;
+          nitro_active: boolean;
+          nitro_remaining_ticks: number;
         };
         current_checkpoint: number;
         is_finished: boolean;

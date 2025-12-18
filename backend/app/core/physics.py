@@ -68,6 +68,9 @@ class CarState:
         angular_velocity: Rate of rotation (radians/second)
         is_drifting: Whether the car is currently in a drift
         drift_angle: Angle between heading and velocity direction (radians)
+        nitro_charges: Number of nitro boosts remaining
+        nitro_active: Whether nitro is currently active
+        nitro_remaining_ticks: Ticks remaining for current nitro boost
     """
     position: Vector2
     velocity: Vector2
@@ -75,6 +78,9 @@ class CarState:
     angular_velocity: float = 0.0
     is_drifting: bool = False
     drift_angle: float = 0.0
+    nitro_charges: int = 0
+    nitro_active: bool = False
+    nitro_remaining_ticks: int = 0
 
     def get_speed(self) -> float:
         """Get current speed (magnitude of velocity)."""
@@ -101,26 +107,77 @@ class CarPhysics:
         self.settings = get_settings()
         self.physics = self.settings.physics
 
-    def apply_acceleration(self, state: CarState, dt: float) -> CarState:
+    def update_nitro(self, state: CarState, use_nitro: bool) -> CarState:
+        """
+        Update nitro state based on input.
+
+        Args:
+            state: Current car state
+            use_nitro: Whether nitro button is pressed
+
+        Returns:
+            New car state with updated nitro
+        """
+        from ..config import get_settings
+        settings = get_settings()
+
+        nitro_charges = state.nitro_charges
+        nitro_active = state.nitro_active
+        nitro_remaining_ticks = state.nitro_remaining_ticks
+
+        # Activate nitro if button pressed and we have charges
+        if use_nitro and not nitro_active and nitro_charges > 0:
+            nitro_active = True
+            nitro_charges -= 1
+            nitro_remaining_ticks = settings.car.DEFAULT_NITRO_DURATION_TICKS
+
+        # Deplete nitro over time
+        if nitro_active:
+            nitro_remaining_ticks -= 1
+            if nitro_remaining_ticks <= 0:
+                nitro_active = False
+                nitro_remaining_ticks = 0
+
+        return CarState(
+            position=state.position,
+            velocity=state.velocity,
+            heading=state.heading,
+            angular_velocity=state.angular_velocity,
+            is_drifting=state.is_drifting,
+            drift_angle=state.drift_angle,
+            nitro_charges=nitro_charges,
+            nitro_active=nitro_active,
+            nitro_remaining_ticks=nitro_remaining_ticks
+        )
+
+    def apply_acceleration(self, state: CarState, dt: float, nitro_active: bool = False) -> CarState:
         """
         Apply forward acceleration to the car.
 
         Args:
             state: Current car state
             dt: Time delta in seconds
+            nitro_active: Whether nitro boost is currently active
 
         Returns:
             New car state with acceleration applied
         """
+        from ..config import get_settings
+        settings = get_settings()
+
         heading_vec = state.get_heading_vector()
         acceleration = heading_vec * self.physics.ACCELERATION * dt
 
         new_velocity = state.velocity + acceleration
 
-        # Clamp to max speed
+        # Clamp to max speed (with nitro multiplier if active)
+        max_speed = self.physics.MAX_SPEED
+        if nitro_active:
+            max_speed *= settings.car.NITRO_SPEED_MULTIPLIER
+
         speed = new_velocity.magnitude()
-        if speed > self.physics.MAX_SPEED:
-            new_velocity = new_velocity.normalize() * self.physics.MAX_SPEED
+        if speed > max_speed:
+            new_velocity = new_velocity.normalize() * max_speed
 
         return CarState(
             position=state.position,
@@ -128,7 +185,10 @@ class CarPhysics:
             heading=state.heading,
             angular_velocity=state.angular_velocity,
             is_drifting=state.is_drifting,
-            drift_angle=state.drift_angle
+            drift_angle=state.drift_angle,
+            nitro_charges=state.nitro_charges,
+            nitro_active=state.nitro_active,
+            nitro_remaining_ticks=state.nitro_remaining_ticks
         )
 
     def apply_braking(self, state: CarState, dt: float) -> CarState:
@@ -161,7 +221,10 @@ class CarPhysics:
             heading=state.heading,
             angular_velocity=state.angular_velocity,
             is_drifting=state.is_drifting,
-            drift_angle=state.drift_angle
+            drift_angle=state.drift_angle,
+            nitro_charges=state.nitro_charges,
+            nitro_active=state.nitro_active,
+            nitro_remaining_ticks=state.nitro_remaining_ticks
         )
 
     def apply_turning(self, state: CarState, turn_direction: float, dt: float) -> CarState:
@@ -199,7 +262,10 @@ class CarPhysics:
             heading=new_heading,
             angular_velocity=turn_rate,
             is_drifting=state.is_drifting,
-            drift_angle=state.drift_angle
+            drift_angle=state.drift_angle,
+            nitro_charges=state.nitro_charges,
+            nitro_active=state.nitro_active,
+            nitro_remaining_ticks=state.nitro_remaining_ticks
         )
 
     def apply_drag(self, state: CarState, dt: float) -> CarState:
@@ -221,7 +287,12 @@ class CarPhysics:
                 position=state.position,
                 velocity=Vector2(0, 0),
                 heading=state.heading,
-                angular_velocity=state.angular_velocity
+                angular_velocity=state.angular_velocity,
+                is_drifting=state.is_drifting,
+                drift_angle=state.drift_angle,
+                nitro_charges=state.nitro_charges,
+                nitro_active=state.nitro_active,
+                nitro_remaining_ticks=state.nitro_remaining_ticks
             )
 
         # Drag is proportional to velocity squared
@@ -240,7 +311,10 @@ class CarPhysics:
             heading=state.heading,
             angular_velocity=state.angular_velocity,
             is_drifting=state.is_drifting,
-            drift_angle=state.drift_angle
+            drift_angle=state.drift_angle,
+            nitro_charges=state.nitro_charges,
+            nitro_active=state.nitro_active,
+            nitro_remaining_ticks=state.nitro_remaining_ticks
         )
 
     def calculate_drift_state(self, state: CarState, grip_coefficient: float = 1.0) -> Tuple[bool, float]:
@@ -335,7 +409,10 @@ class CarPhysics:
             heading=state.heading,
             angular_velocity=state.angular_velocity,
             is_drifting=is_drifting,
-            drift_angle=drift_angle
+            drift_angle=drift_angle,
+            nitro_charges=state.nitro_charges,
+            nitro_active=state.nitro_active,
+            nitro_remaining_ticks=state.nitro_remaining_ticks
         )
 
     def update_position(self, state: CarState, dt: float) -> CarState:
@@ -357,7 +434,10 @@ class CarPhysics:
             heading=state.heading,
             angular_velocity=state.angular_velocity,
             is_drifting=state.is_drifting,
-            drift_angle=state.drift_angle
+            drift_angle=state.drift_angle,
+            nitro_charges=state.nitro_charges,
+            nitro_active=state.nitro_active,
+            nitro_remaining_ticks=state.nitro_remaining_ticks
         )
 
     def simulate_step(
@@ -367,7 +447,8 @@ class CarPhysics:
         braking: bool,
         turn_direction: float,
         dt: float,
-        grip_coefficient: float = 1.0
+        grip_coefficient: float = 1.0,
+        use_nitro: bool = False
     ) -> CarState:
         """
         Simulate one physics step with the given inputs.
@@ -379,15 +460,19 @@ class CarPhysics:
             turn_direction: -1 for left, +1 for right, 0 for straight
             dt: Time delta in seconds
             grip_coefficient: Surface grip coefficient (0-1, default asphalt = 1.0)
+            use_nitro: True if nitro button is pressed
 
         Returns:
             New car state after simulation step
         """
         new_state = state
 
+        # Handle nitro activation and depletion
+        new_state = self.update_nitro(new_state, use_nitro)
+
         # Apply inputs
         if accelerating:
-            new_state = self.apply_acceleration(new_state, dt)
+            new_state = self.apply_acceleration(new_state, dt, nitro_active=new_state.nitro_active)
 
         if braking:
             new_state = self.apply_braking(new_state, dt)
@@ -407,7 +492,7 @@ class CarPhysics:
         return new_state
 
 
-def create_car_at_position(x: float, y: float, heading: float = 0.0) -> CarState:
+def create_car_at_position(x: float, y: float, heading: float = 0.0, nitro_charges: int = 0) -> CarState:
     """
     Create a new car at the specified position.
 
@@ -415,6 +500,7 @@ def create_car_at_position(x: float, y: float, heading: float = 0.0) -> CarState
         x: X coordinate
         y: Y coordinate
         heading: Initial heading in radians (default: 0 = facing right)
+        nitro_charges: Number of nitro charges (default: 0)
 
     Returns:
         New CarState at the specified position
@@ -423,5 +509,8 @@ def create_car_at_position(x: float, y: float, heading: float = 0.0) -> CarState
         position=Vector2(x, y),
         velocity=Vector2(0, 0),
         heading=heading,
-        angular_velocity=0.0
+        angular_velocity=0.0,
+        nitro_charges=nitro_charges,
+        nitro_active=False,
+        nitro_remaining_ticks=0
     )

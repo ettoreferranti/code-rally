@@ -80,6 +80,9 @@ export default function MultiplayerRace() {
             drift_angle: playerData.car.drift_angle,
             throttle: 0,  // Not tracked server-side yet
             is_off_track: playerData.is_off_track,
+            nitro_charges: playerData.car.nitro_charges,
+            nitro_active: playerData.car.nitro_active,
+            nitro_remaining_ticks: playerData.car.nitro_remaining_ticks,
           }],
           tick: state.tick,
           raceInfo: {
