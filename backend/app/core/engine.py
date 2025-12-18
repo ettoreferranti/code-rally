@@ -53,6 +53,7 @@ class PlayerState:
     input: PlayerInput = field(default_factory=PlayerInput)
     current_checkpoint: int = 0
     checkpoints_passed: Set[int] = field(default_factory=set)
+    split_times: List[float] = field(default_factory=list)  # Time at each checkpoint
     is_finished: bool = False
     finish_time: Optional[float] = None
     is_off_track: bool = False
@@ -178,6 +179,7 @@ class GameEngine:
             # Reset race progress
             player.current_checkpoint = 0
             player.checkpoints_passed = set()
+            player.split_times = []
             player.is_finished = False
             player.finish_time = None
             player.is_off_track = False
@@ -577,6 +579,11 @@ class GameEngine:
                 player.checkpoints_passed.add(player.current_checkpoint)
                 player.current_checkpoint += 1
 
+                # Record split time (elapsed time since race start)
+                if self.state.race_info.start_time is not None:
+                    elapsed_time = time.time() - self.state.race_info.start_time
+                    player.split_times.append(elapsed_time)
+
         # Update previous position for next frame
         player._prev_position = Vector2(curr_x, curr_y)
 
@@ -696,6 +703,7 @@ class GameEngine:
                         'nitro_remaining_ticks': player.car.nitro_remaining_ticks,
                     },
                     'current_checkpoint': player.current_checkpoint,
+                    'split_times': player.split_times,
                     'is_finished': player.is_finished,
                     'finish_time': player.finish_time,
                     'is_off_track': player.is_off_track,

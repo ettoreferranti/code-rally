@@ -32,6 +32,7 @@ export interface GameStateMessage {
           nitro_remaining_ticks: number;
         };
         current_checkpoint: number;
+        split_times: number[];  // Elapsed time at each checkpoint
         is_finished: boolean;
         finish_time: number | null;
         is_off_track: boolean;
