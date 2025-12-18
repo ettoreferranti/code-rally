@@ -78,6 +78,20 @@ export interface RaceInfo {
   startTime: number | null;  // Time in seconds when race started
   countdownRemaining?: number;  // Countdown seconds remaining before race starts
   raceStatus?: string;  // Race status: 'waiting', 'countdown', 'racing', 'finished'
+  firstFinisherTime?: number | null;  // Time when first player finished (for grace period)
+  gracePeriodRemaining?: number;  // Seconds remaining for other players to finish
+}
+
+/**
+ * Race result for a single player.
+ */
+export interface PlayerResult {
+  playerId: string;
+  playerName?: string;
+  position: number | null;  // Final position (1st, 2nd, 3rd, etc.) - null for DNF
+  finishTime: number | null;  // Total stage time in seconds
+  points: number;  // Points awarded based on position
+  dnf: boolean;  // Did Not Finish
 }
 
 export interface GameState {

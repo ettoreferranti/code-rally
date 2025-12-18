@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { GameCanvas, useKeyboardInput } from '../game';
-import type { GameState, Track } from '../game/types';
+import type { GameState, Track, PlayerResult } from '../game/types';
 import { RaceHUD } from '../components/RaceHUD';
 import { CountdownOverlay } from '../components/CountdownOverlay';
+import { RaceResultsScreen } from '../components/RaceResultsScreen';
 import { GameWebSocketClient, type GameStateMessage } from '../services';
 
 export default function MultiplayerRace() {
@@ -13,6 +14,9 @@ export default function MultiplayerRace() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [raceStarted, setRaceStarted] = useState(false);
+  const [raceResults, setRaceResults] = useState<PlayerResult[] | null>(null);
+  const [showResults, setShowResults] = useState(false);
+  const [hasShownResults, setHasShownResults] = useState(false);
 
   const inputState = useKeyboardInput();
   const wsRef = useRef<GameWebSocketClient | null>(null);
@@ -86,11 +90,34 @@ export default function MultiplayerRace() {
             startTime: state.race_info.start_time,
             countdownRemaining: state.race_info.countdown_remaining,
             raceStatus: state.race_info.status,
+            firstFinisherTime: state.race_info.first_finisher_time,
+            gracePeriodRemaining: state.race_info.grace_period_remaining,
           }
         };
 
         console.log('Setting game state, tick:', state.tick);
         setGameState(newGameState);
+
+        // Check if race has finished and collect results
+        if (state.race_info.status === 'finished' && !hasShownResults) {
+          const startTime = state.race_info.start_time;
+          const results: PlayerResult[] = Object.entries(state.players).map(([pid, player]) => ({
+            playerId: pid,
+            position: player.position,
+            // Calculate race duration: finish_time - start_time (both are absolute timestamps)
+            finishTime: player.finish_time && startTime ? player.finish_time - startTime : null,
+            points: player.points,
+            dnf: player.dnf,
+          }));
+          setRaceResults(results);
+          setShowResults(true);
+          setHasShownResults(true);
+        }
+
+        // Reset hasShownResults flag when race restarts
+        if (state.race_info.status === 'waiting' && hasShownResults) {
+          setHasShownResults(false);
+        }
       },
 
       onDisconnected: () => {
@@ -162,6 +189,14 @@ export default function MultiplayerRace() {
     }
   };
 
+  const handleCloseResults = () => {
+    console.log('Closing results screen');
+    setShowResults(false);
+    setRaceResults(null);
+    setRaceStarted(false);
+    // Don't reset hasShownResults here - let it reset when race status becomes 'waiting'
+  };
+
   if (loading) {
     return (
       <div className="p-8">
@@ -223,6 +258,13 @@ export default function MultiplayerRace() {
             isVisible={gameState.raceInfo.raceStatus === 'countdown'}
             raceStatus={gameState.raceInfo.raceStatus}
             isFinished={gameState.raceInfo.isFinished}
+          />
+        )}
+        {showResults && raceResults && playerId && (
+          <RaceResultsScreen
+            results={raceResults}
+            currentPlayerId={playerId}
+            onClose={handleCloseResults}
           />
         )}
       </div>

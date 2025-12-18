@@ -136,6 +136,27 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
           ⚠️ OFF TRACK
         </div>
       )}
+
+      {/* Grace Period Warning */}
+      {!raceInfo.isFinished &&
+       raceInfo.gracePeriodRemaining !== undefined &&
+       raceInfo.gracePeriodRemaining > 0 && (
+        <div
+          style={{
+            marginTop: '15px',
+            padding: '10px',
+            backgroundColor: 'rgba(255, 165, 0, 0.3)',
+            borderRadius: '4px',
+            textAlign: 'center',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            color: '#FFA500',
+            border: '2px solid rgba(255, 165, 0, 0.6)',
+          }}
+        >
+          ⏱️ GRACE PERIOD: {Math.ceil(raceInfo.gracePeriodRemaining)}s
+        </div>
+      )}
     </div>
   );
 };

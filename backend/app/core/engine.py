@@ -41,6 +41,8 @@ class RaceInfo:
     start_time: Optional[float] = None
     countdown_remaining: float = 0.0
     finish_time: Optional[float] = None
+    first_finisher_time: Optional[float] = None  # When first car finished
+    grace_period_remaining: float = 0.0  # Grace period for other finishers
 
 
 @dataclass
@@ -54,6 +56,9 @@ class PlayerState:
     is_finished: bool = False
     finish_time: Optional[float] = None
     is_off_track: bool = False
+    position: Optional[int] = None  # Final race position (1st, 2nd, etc.)
+    points: int = 0  # Points awarded for this race
+    dnf: bool = False  # Did Not Finish
 
 
 @dataclass
@@ -139,9 +144,38 @@ class GameEngine:
             self.state.players[player_id].input = input_data
 
     def start_race(self) -> None:
-        """Start the race countdown."""
+        """Start the race countdown and reset race state if restarting."""
+        # Reset race info
         self.state.race_info.status = RaceStatus.COUNTDOWN
         self.state.race_info.countdown_remaining = float(self.settings.game.COUNTDOWN_SECONDS)
+        self.state.race_info.start_time = None
+        self.state.race_info.finish_time = None
+        self.state.race_info.first_finisher_time = None
+        self.state.race_info.grace_period_remaining = 0.0
+
+        # Reset all player states
+        for player in self.state.players.values():
+            # Reset car to starting position
+            player.car.position = Vector2(
+                self.state.track.start_position[0],
+                self.state.track.start_position[1]
+            )
+            player.car.velocity = Vector2(0, 0)
+            player.car.heading = self.state.track.start_heading
+            player.car.angular_velocity = 0
+            player.car.is_drifting = False
+            player.car.drift_angle = 0
+            player.car.throttle = 0
+
+            # Reset race progress
+            player.current_checkpoint = 0
+            player.checkpoints_passed = set()
+            player.is_finished = False
+            player.finish_time = None
+            player.is_off_track = False
+            player.position = None
+            player.points = 0
+            player.dnf = False
 
     async def start_loop(self) -> None:
         """Start the game loop in the background."""
@@ -202,6 +236,20 @@ class GameEngine:
                 self.state.race_info.status = RaceStatus.RACING
                 self.state.race_info.start_time = time.time()
                 self.state.race_info.countdown_remaining = 0.0
+
+        elif self.state.race_info.status == RaceStatus.RACING:
+            # Check if grace period is active
+            if self.state.race_info.first_finisher_time is not None:
+                self.state.race_info.grace_period_remaining -= self.tick_interval
+
+                # Grace period expired - mark DNF and end race
+                if self.state.race_info.grace_period_remaining <= 0:
+                    for player in self.state.players.values():
+                        if not player.is_finished:
+                            player.dnf = True
+
+                    self._finalize_race()
+                    self.state.race_info.status = RaceStatus.FINISHED
 
     def _update_player_physics(self, player: PlayerState) -> None:
         """
@@ -565,11 +613,48 @@ class GameEngine:
                 player.is_finished = True
                 player.finish_time = time.time()
 
+                # Track first finisher and start grace period
+                if self.state.race_info.first_finisher_time is None:
+                    self.state.race_info.first_finisher_time = time.time()
+                    self.state.race_info.grace_period_remaining = float(
+                        self.settings.game.FINISH_GRACE_PERIOD
+                    )
+
                 # Check if all players finished
                 all_finished = all(p.is_finished for p in self.state.players.values())
                 if all_finished:
+                    self._finalize_race()
                     self.state.race_info.status = RaceStatus.FINISHED
                     self.state.race_info.finish_time = time.time()
+
+    def _finalize_race(self) -> None:
+        """
+        Finalize race results - calculate positions and award points.
+
+        Called when all players finish or grace period expires.
+        """
+        # Get all finished players sorted by finish time
+        finished_players = [
+            p for p in self.state.players.values()
+            if p.is_finished and p.finish_time is not None
+        ]
+        finished_players.sort(key=lambda p: p.finish_time)
+
+        # Assign positions and points
+        points_table = self.settings.race.POINTS_BY_POSITION
+        for position, player in enumerate(finished_players, start=1):
+            player.position = position
+            # Award points based on position (with bounds checking)
+            if position <= len(points_table):
+                player.points = points_table[position - 1]
+            else:
+                player.points = 0  # No points beyond 8th place
+
+        # Mark DNF players
+        for player in self.state.players.values():
+            if player.dnf:
+                player.position = None
+                player.points = 0
 
     def get_state_snapshot(self) -> Dict:
         """
@@ -585,6 +670,8 @@ class GameEngine:
                 'start_time': self.state.race_info.start_time,
                 'countdown_remaining': self.state.race_info.countdown_remaining,
                 'finish_time': self.state.race_info.finish_time,
+                'first_finisher_time': self.state.race_info.first_finisher_time,
+                'grace_period_remaining': self.state.race_info.grace_period_remaining,
             },
             'players': {
                 player_id: {
@@ -600,6 +687,9 @@ class GameEngine:
                     'is_finished': player.is_finished,
                     'finish_time': player.finish_time,
                     'is_off_track': player.is_off_track,
+                    'position': player.position,
+                    'points': player.points,
+                    'dnf': player.dnf,
                 }
                 for player_id, player in self.state.players.items()
             }

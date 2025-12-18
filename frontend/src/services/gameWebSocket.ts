@@ -15,6 +15,8 @@ export interface GameStateMessage {
       start_time: number | null;
       countdown_remaining: number;
       finish_time: number | null;
+      first_finisher_time: number | null;
+      grace_period_remaining: number;
     };
     players: {
       [playerId: string]: {
@@ -30,6 +32,9 @@ export interface GameStateMessage {
         is_finished: boolean;
         finish_time: number | null;
         is_off_track: boolean;
+        position: number | null;  // Final race position (1st, 2nd, etc.)
+        points: number;  // Points awarded
+        dnf: boolean;  // Did Not Finish
       };
     };
   };
