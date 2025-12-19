@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GameCanvas, createMockGameState, useKeyboardInput, useGameLoop } from '../game';
 import type { GameState, GameLoopCallbacks } from '../game';
 import { RaceHUD } from '../components/RaceHUD';
 import { generateTrack } from '../services';
 
-export default function Race() {
+export default function Practice() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,12 +61,12 @@ export default function Race() {
     initializeRace();
   }, []);
 
-  // Game loop callback to update state
-  const callbacks: GameLoopCallbacks = useCallback({
+  // Game loop callback to update state (memoized to prevent loop restarts)
+  const callbacks: GameLoopCallbacks = useMemo(() => ({
     onUpdate: (newState: GameState) => {
       setGameState(newState);
     }
-  }, []);
+  }), []);
 
   // Run the game loop with physics
   useGameLoop(gameState, inputState, callbacks);
@@ -74,7 +74,7 @@ export default function Race() {
   if (loading) {
     return (
       <div className="p-8">
-        <h2 className="text-3xl font-bold mb-4">Rally Stage</h2>
+        <h2 className="text-3xl font-bold mb-4">Practice Mode</h2>
         <div className="mt-8 bg-gray-800 p-4 rounded-lg text-center py-12">
           <p className="text-xl text-gray-400">Loading track from server...</p>
         </div>
@@ -85,7 +85,7 @@ export default function Race() {
   if (error) {
     return (
       <div className="p-8">
-        <h2 className="text-3xl font-bold mb-4">Rally Stage</h2>
+        <h2 className="text-3xl font-bold mb-4">Practice Mode</h2>
         <div className="mt-8 bg-red-900/20 border border-red-600 p-4 rounded-lg">
           <p className="text-red-400">Error: {error}</p>
           <p className="text-sm text-gray-400 mt-2">Using fallback mock data instead.</p>
@@ -100,9 +100,9 @@ export default function Race() {
 
   return (
     <div className="p-8">
-      <h2 className="text-3xl font-bold mb-4">Rally Stage</h2>
+      <h2 className="text-3xl font-bold mb-4">Practice Mode</h2>
       <p className="text-gray-300 mb-4">
-        Drive through the procedurally generated rally stage with containment walls and obstacles!
+        Practice driving with client-side physics. Perfect for testing and bot development!
       </p>
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
         <GameCanvas gameState={gameState} width={800} height={600} />

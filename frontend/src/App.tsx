@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
-import { Home, Race, MultiplayerRace, Editor } from './pages'
+import { Home, Practice, MultiplayerRace, Editor } from './pages'
 
 function App() {
   return (
@@ -8,7 +8,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
-          <Route path="race" element={<Race />} />
+          <Route path="practice" element={<Practice />} />
           <Route path="multiplayer" element={<MultiplayerRace />} />
           <Route path="editor" element={<Editor />} />
         </Route>

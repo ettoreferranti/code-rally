@@ -31,96 +31,136 @@ export function useGameLoop(
   const lastTickRef = useRef(0);
   const accumulatorRef = useRef(0);
   const prevCarPosRef = useRef<Vector2 | null>(null);
+  const inputStateRef = useRef(inputState);
+  const callbacksRef = useRef(callbacks);
+  const currentGameStateRef = useRef<GameState | null>(null);
+  const hasStartedRef = useRef(false);
+
+  // Update refs when values change (without restarting the loop)
+  useEffect(() => {
+    inputStateRef.current = inputState;
+  }, [inputState]);
 
   useEffect(() => {
-    if (!gameState) return;
+    callbacksRef.current = callbacks;
+  }, [callbacks]);
 
-    const physics = physicsRef.current;
-    let animationFrameId: number;
-    let running = true;
-    let currentGameState = gameState;
-
-    // Initialize previous car position
-    if (gameState.cars.length > 0) {
-      prevCarPosRef.current = { ...gameState.cars[0].position };
+  // Separate effect to update game state ref (doesn't restart loop)
+  useEffect(() => {
+    if (gameState && !currentGameStateRef.current) {
+      currentGameStateRef.current = gameState;
     }
+  }, [gameState]);
 
-    const gameLoop = (currentTime: number) => {
-      if (!running) return;
+  // Start the game loop once (only runs once on mount)
+  useEffect(() => {
+    // Wait for game state to be ready
+    const waitForGameState = setInterval(() => {
+      if (currentGameStateRef.current && !hasStartedRef.current) {
+        clearInterval(waitForGameState);
+        hasStartedRef.current = true;
+        startLoop();
+      }
+    }, 10);
 
-      // Initialize lastTick on first frame
-      if (lastTickRef.current === 0) {
-        lastTickRef.current = currentTime;
+    const startLoop = () => {
+      console.log('[GameLoop] Starting continuous game loop');
+
+      const physics = physicsRef.current;
+      let running = true;
+      let animationFrameId: number;
+
+      // Initialize previous car position
+      const initialState = currentGameStateRef.current!;
+      if (initialState.cars.length > 0) {
+        prevCarPosRef.current = { ...initialState.cars[0].position };
       }
 
-      // Calculate frame delta time (in seconds)
-      const frameDelta = (currentTime - lastTickRef.current) / 1000;
-      lastTickRef.current = currentTime;
-
-      // Accumulate time
-      accumulatorRef.current += frameDelta;
-
-      // Cap accumulator to prevent spiral of death
-      if (accumulatorRef.current > 0.25) {
-        accumulatorRef.current = 0.25;
-      }
-
-      // Run physics updates at fixed timestep
-      while (accumulatorRef.current >= PHYSICS_DT) {
-        // Store previous car position for checkpoint detection
-        const prevCarPos = prevCarPosRef.current || currentGameState.cars[0]?.position || { x: 0, y: 0 };
-
-        // Update physics for each car
-        const updatedCars = currentGameState.cars.map((car, index) => {
-          // Detect surface type at car's position
-          const surface = getSurfaceAtPosition(currentGameState.track, car.position);
-
-          // Only apply input to first car (player)
-          const carInput = index === 0 ? inputState : {
-            accelerate: false,
-            brake: false,
-            turnLeft: false,
-            turnRight: false,
-            nitro: false
-          };
-
-          return physics.update(car, carInput, surface, currentGameState.track, PHYSICS_DT);
-        });
-
-        // Create new game state with updated cars
-        currentGameState = {
-          ...currentGameState,
-          cars: updatedCars,
-          tick: currentGameState.tick + 1
-        };
-
-        // Check for checkpoint progress
-        currentGameState = updateCheckpointProgress(currentGameState, prevCarPos);
-
-        // Update previous car position
-        if (currentGameState.cars.length > 0) {
-          prevCarPosRef.current = { ...currentGameState.cars[0].position };
+      let frameCount = 0;
+      const gameLoop = (currentTime: number) => {
+        if (!running || !currentGameStateRef.current) {
+          return;
         }
 
-        accumulatorRef.current -= PHYSICS_DT;
-      }
+        frameCount++;
+        if (frameCount % 60 === 0) {
+          console.log('[GameLoop] Frame:', frameCount, 'Tick:', currentGameStateRef.current.tick);
+        }
 
-      // Notify of updated state
-      callbacks.onUpdate(currentGameState);
+        // Initialize lastTick on first frame
+        if (lastTickRef.current === 0) {
+          lastTickRef.current = currentTime;
+        }
 
-      // Continue loop
+        // Calculate frame delta time (in seconds)
+        const frameDelta = (currentTime - lastTickRef.current) / 1000;
+        lastTickRef.current = currentTime;
+
+        // Accumulate time
+        accumulatorRef.current += frameDelta;
+
+        // Cap accumulator to prevent spiral of death
+        if (accumulatorRef.current > 0.25) {
+          accumulatorRef.current = 0.25;
+        }
+
+        // Run physics updates at fixed timestep
+        while (accumulatorRef.current >= PHYSICS_DT) {
+          const currentState = currentGameStateRef.current;
+
+          // Store previous car position for checkpoint detection
+          const prevCarPos = prevCarPosRef.current || currentState.cars[0]?.position || { x: 0, y: 0 };
+
+          // Update physics for each car
+          const updatedCars = currentState.cars.map((car, index) => {
+            // Detect surface type at car's position
+            const surface = getSurfaceAtPosition(currentState.track, car.position);
+
+            // Only apply input to first car (player)
+            const carInput = index === 0 ? inputStateRef.current : {
+              accelerate: false,
+              brake: false,
+              turnLeft: false,
+              turnRight: false,
+              nitro: false
+            };
+
+            return physics.update(car, carInput, surface, currentState.track, PHYSICS_DT);
+          });
+
+          // Create new game state with updated cars
+          const newState: GameState = {
+            ...currentState,
+            cars: updatedCars,
+            tick: currentState.tick + 1
+          };
+
+          // Check for checkpoint progress
+          currentGameStateRef.current = updateCheckpointProgress(newState, prevCarPos);
+
+          // Update previous car position
+          if (currentGameStateRef.current.cars.length > 0) {
+            prevCarPosRef.current = { ...currentGameStateRef.current.cars[0].position };
+          }
+
+          accumulatorRef.current -= PHYSICS_DT;
+        }
+
+        // Notify of updated state
+        callbacksRef.current.onUpdate(currentGameStateRef.current);
+
+        // Continue loop
+        animationFrameId = requestAnimationFrame(gameLoop);
+      };
+
+      // Start the loop
       animationFrameId = requestAnimationFrame(gameLoop);
     };
 
-    // Start the loop
-    animationFrameId = requestAnimationFrame(gameLoop);
-
-    // Cleanup
+    // Cleanup function (only on unmount)
     return () => {
-      running = false;
-      cancelAnimationFrame(animationFrameId);
-      lastTickRef.current = 0;
-      accumulatorRef.current = 0;
+      console.log('[GameLoop] Stopping game loop (component unmounting)');
+      clearInterval(waitForGameState);
     };
-  }, [gameState, inputState, callbacks]);
+  }, []); // Empty deps - only run once on mount, cleanup on unmount
 }

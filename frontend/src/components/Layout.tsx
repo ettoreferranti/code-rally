@@ -20,10 +20,10 @@ export default function Layout() {
                 Home
               </Link>
               <Link
-                to="/race"
+                to="/practice"
                 className="px-4 py-2 rounded hover:bg-white/20 transition"
               >
-                Race
+                Practice
               </Link>
               <Link
                 to="/multiplayer"
