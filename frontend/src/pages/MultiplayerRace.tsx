@@ -16,13 +16,14 @@ export default function MultiplayerRace() {
   const [raceStarted, setRaceStarted] = useState(false);
   const [raceResults, setRaceResults] = useState<PlayerResult[] | null>(null);
   const [showResults, setShowResults] = useState(false);
-  const [hasShownResults, setHasShownResults] = useState(false);
 
   const inputState = useKeyboardInput();
   const wsRef = useRef<GameWebSocketClient | null>(null);
   const inputIntervalRef = useRef<number | null>(null);
   const trackRef = useRef<Track | null>(null);
   const playerIdRef = useRef<string | null>(null);
+  const hasShownResultsRef = useRef<boolean>(false);
+  const hasClosedResultsRef = useRef<boolean>(false);
 
   // Log when game state changes
   useEffect(() => {
@@ -95,6 +96,8 @@ export default function MultiplayerRace() {
             raceStatus: state.race_info.status,
             firstFinisherTime: state.race_info.first_finisher_time,
             gracePeriodRemaining: state.race_info.grace_period_remaining,
+            currentPosition: playerData.position,
+            totalPlayers: Object.keys(state.players).length,
           }
         };
 
@@ -102,7 +105,7 @@ export default function MultiplayerRace() {
         setGameState(newGameState);
 
         // Check if race has finished and collect results
-        if (state.race_info.status === 'finished' && !hasShownResults) {
+        if (state.race_info.status === 'finished' && !hasShownResultsRef.current && !hasClosedResultsRef.current) {
           const startTime = state.race_info.start_time;
           const results: PlayerResult[] = Object.entries(state.players).map(([pid, player]) => ({
             playerId: pid,
@@ -114,12 +117,13 @@ export default function MultiplayerRace() {
           }));
           setRaceResults(results);
           setShowResults(true);
-          setHasShownResults(true);
+          hasShownResultsRef.current = true;
         }
 
-        // Reset hasShownResults flag when race restarts
-        if (state.race_info.status === 'waiting' && hasShownResults) {
-          setHasShownResults(false);
+        // Reset flags when race restarts
+        if (state.race_info.status === 'waiting' && (hasShownResultsRef.current || hasClosedResultsRef.current)) {
+          hasShownResultsRef.current = false;
+          hasClosedResultsRef.current = false;
         }
       },
 
@@ -185,6 +189,9 @@ export default function MultiplayerRace() {
     console.log('Start Race clicked');
     if (wsRef.current && wsRef.current.isConnected()) {
       console.log('Sending start race command...');
+      // Reset flags for new race
+      hasShownResultsRef.current = false;
+      hasClosedResultsRef.current = false;
       wsRef.current.startRace();
       setRaceStarted(true);
     } else {
@@ -197,7 +204,7 @@ export default function MultiplayerRace() {
     setShowResults(false);
     setRaceResults(null);
     setRaceStarted(false);
-    // Don't reset hasShownResults here - let it reset when race status becomes 'waiting'
+    hasClosedResultsRef.current = true;  // Prevent results from reopening until race restarts
   };
 
   if (loading) {

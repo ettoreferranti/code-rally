@@ -58,6 +58,18 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
         minWidth: '200px'
       }}
     >
+      {/* Position */}
+      {raceInfo.currentPosition !== undefined && raceInfo.currentPosition !== null && raceInfo.totalPlayers && (
+        <div style={{ marginBottom: '10px' }}>
+          <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>
+            POSITION
+          </div>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>
+            {raceInfo.currentPosition}{raceInfo.currentPosition === 1 ? 'st' : raceInfo.currentPosition === 2 ? 'nd' : raceInfo.currentPosition === 3 ? 'rd' : 'th'} / {raceInfo.totalPlayers}
+          </div>
+        </div>
+      )}
+
       {/* Stage Progress */}
       <div style={{ marginBottom: '10px' }}>
         <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>

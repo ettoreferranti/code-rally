@@ -83,6 +83,8 @@ export interface RaceInfo {
   raceStatus?: string;  // Race status: 'waiting', 'countdown', 'racing', 'finished'
   firstFinisherTime?: number | null;  // Time when first player finished (for grace period)
   gracePeriodRemaining?: number;  // Seconds remaining for other players to finish
+  currentPosition?: number | null;  // Current race position (1st, 2nd, etc.)
+  totalPlayers?: number;  // Total number of players in the race
 }
 
 /**

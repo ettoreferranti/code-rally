@@ -236,6 +236,9 @@ class GameEngine:
                     self._check_checkpoint_progress(player)
                     self._check_finish(player)
 
+            # Update race positions based on current progress
+            self._update_race_positions()
+
     def _update_race_status(self) -> None:
         """Update race countdown and status."""
         if self.state.race_info.status == RaceStatus.COUNTDOWN:
@@ -642,6 +645,75 @@ class GameEngine:
                     self._finalize_race()
                     self.state.race_info.status = RaceStatus.FINISHED
                     self.state.race_info.finish_time = time.time()
+
+    def _calculate_player_progress(self, player: PlayerState) -> float:
+        """
+        Calculate player's progress through the stage as a continuous value.
+
+        Args:
+            player: Player to calculate progress for
+
+        Returns:
+            Progress value (higher = further along the track)
+        """
+        # If finished, return maximum progress
+        if player.is_finished:
+            return float('inf')
+
+        # Base progress on checkpoints completed
+        checkpoint_progress = player.current_checkpoint * 1000.0
+
+        # Add distance to next checkpoint for finer granularity
+        if player.current_checkpoint < len(self.state.track.checkpoints):
+            checkpoint = self.state.track.checkpoints[player.current_checkpoint]
+            cp_x, cp_y = checkpoint.position
+
+            # Calculate distance to next checkpoint (negative because closer = better)
+            dx = player.car.position.x - cp_x
+            dy = player.car.position.y - cp_y
+            distance_to_checkpoint = (dx * dx + dy * dy) ** 0.5
+
+            # Subtract distance (closer to checkpoint = higher progress)
+            checkpoint_progress -= distance_to_checkpoint
+
+        return checkpoint_progress
+
+    def _update_race_positions(self) -> None:
+        """
+        Update race positions in real-time based on progress.
+
+        Finished players ranked by finish time, racing players by progress.
+        """
+        # Separate finished and racing players
+        finished_players = [
+            p for p in self.state.players.values()
+            if p.is_finished and p.finish_time is not None
+        ]
+        racing_players = [
+            p for p in self.state.players.values()
+            if not p.is_finished and not p.dnf
+        ]
+
+        # Sort finished players by finish time
+        finished_players.sort(key=lambda p: p.finish_time)
+
+        # Sort racing players by progress
+        racing_players.sort(key=lambda p: self._calculate_player_progress(p), reverse=True)
+
+        # Assign positions: finished players get 1st, 2nd, etc., then racing players
+        position = 1
+        for player in finished_players:
+            player.position = position
+            position += 1
+
+        for player in racing_players:
+            player.position = position
+            position += 1
+
+        # DNF players have no position
+        for player in self.state.players.values():
+            if player.dnf:
+                player.position = None
 
     def _finalize_race(self) -> None:
         """

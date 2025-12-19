@@ -28,8 +28,8 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
   const [hasShownFinish, setHasShownFinish] = useState(false);
 
   useEffect(() => {
-    // Reset when race status changes back to waiting (new race)
-    if (raceStatus === 'waiting') {
+    // Reset when race status changes to waiting or countdown (new race)
+    if (raceStatus === 'waiting' || raceStatus === 'countdown') {
       setHasShownGo(false);
       setHasShownFinish(false);
       setShowGo(false);
