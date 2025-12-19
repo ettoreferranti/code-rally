@@ -329,3 +329,140 @@ In Practice Mode, you can enable debug visualisation:
 5. **Save nitro**: Use it on straights, not in turns
 6. **Study opponents**: Block or overtake strategically
 7. **Iterate**: Use persistent memory to improve over time
+
+## Technical Implementation
+
+### Type Definitions
+
+All bot API types are defined in `app/bot_runtime/types.py`:
+
+```python
+from app.bot_runtime import (
+    BotGameState,      # Complete game state passed to on_tick()
+    BotCarState,       # Your car's sensor data
+    BotTrackState,     # Track information
+    BotRaycast,        # Raycast sensor result
+    BotOpponent,       # Opponent car data
+    BotRaceState,      # Race progress
+    BotActions,        # Actions to return from on_tick()
+    CollisionEvent,    # Collision event data
+    BaseBot,           # Base class for bots
+)
+```
+
+### BaseBot Class
+
+You can inherit from `BaseBot` for IDE autocomplete and type hints:
+
+```python
+from app.bot_runtime import BaseBot, BotGameState, BotActions
+
+class MyBot(BaseBot):
+    def __init__(self):
+        super().__init__()
+        self.name = "My Racing Bot"
+
+    def on_tick(self, state: BotGameState) -> BotActions:
+        # Your racing logic here
+        return BotActions(accelerate=True)
+```
+
+### Immutability
+
+All bot-facing data structures are **immutable** (frozen dataclasses). This prevents accidental state modification:
+
+```python
+# This will work:
+speed = state.car.speed
+
+# This will raise an error:
+state.car.speed = 100  # FrozenInstanceError!
+```
+
+### Type Safety
+
+All types include full type hints for IDE support:
+
+```python
+def on_tick(self, state: BotGameState) -> BotActions:
+    # IDE will autocomplete these fields:
+    position: Tuple[float, float] = state.car.position
+    checkpoints: List[Tuple[float, float]] = state.track.checkpoints
+    rays: List[BotRaycast] = state.rays
+
+    # Type checker will catch errors:
+    state.car.nitro_charges + state.car.speed  # OK: int + float
+    state.car.position + state.car.heading     # Error: tuple + float
+
+    return BotActions(accelerate=True, brake=False)
+```
+
+### Action Dictionary Format
+
+If you prefer dictionaries, `BotActions` provides conversion methods:
+
+```python
+# Create from dict
+actions_dict = {
+    "accelerate": True,
+    "turn_right": True,
+}
+actions = BotActions.from_dict(actions_dict)
+
+# Convert to dict
+actions_dict = actions.to_dict()
+# Returns: {"accelerate": True, "brake": False, "turn_left": False, ...}
+```
+
+### Callback Signatures
+
+Complete callback method signatures:
+
+```python
+class MyBot(BaseBot):
+    def on_tick(self, state: BotGameState) -> BotActions:
+        """Called ~20 times per second during race."""
+        pass
+
+    def on_collision(self, event: CollisionEvent) -> None:
+        """Called when car collides with something."""
+        pass
+
+    def on_checkpoint(self, checkpoint_index: int, split_time: float) -> None:
+        """Called when passing a checkpoint."""
+        pass
+
+    def on_finish(self, finish_time: float, final_position: int) -> None:
+        """Called when crossing finish line."""
+        pass
+
+    def on_race_start(self) -> None:
+        """Called when race countdown finishes (optional)."""
+        pass
+
+    def on_race_end(self) -> None:
+        """Called when race ends for all players (optional)."""
+        pass
+```
+
+### Memory Persistence
+
+The `self.memory` dictionary is automatically saved and loaded between races:
+
+```python
+class LearningBot(BaseBot):
+    def __init__(self):
+        super().__init__()
+        self.name = "Learning Bot"
+
+        # Initialize memory on first run
+        if 'total_races' not in self.memory:
+            self.memory['total_races'] = 0
+            self.memory['best_checkpoint_times'] = []
+
+    def on_finish(self, finish_time, final_position):
+        self.memory['total_races'] += 1
+        # Memory automatically saved after race
+```
+
+**Note**: Memory is limited to 100KB and must be JSON-serializable (no classes or functions).
