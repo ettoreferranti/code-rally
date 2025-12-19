@@ -6,10 +6,12 @@ Welcome to CodeRally! This guide will teach you how to write Python code to cont
 
 ## Bot Structure
 
-Every bot is a Python class with specific methods that the game engine calls:
+Every bot is a Python class with specific methods that the game engine calls.
+
+**IMPORTANT**: All bots must inherit from `GuardedBotBase` or `BaseBot` to work in the sandbox environment.
 
 ```python
-class MyBot:
+class MyBot(GuardedBotBase):  # or inherit from BaseBot
     def __init__(self):
         """Called once when your bot is loaded."""
         self.name = "My Bot Name"
@@ -197,6 +199,9 @@ For security, your bot code cannot:
 - Use infinite loops (10ms execution timeout per tick)
 - Use more than 50MB memory
 - Access system functions
+- Use augmented assignment on dictionary items (e.g., `dict[key] += 1`)
+
+**Note on Dictionary Updates**: Instead of `self.memory['count'] += 1`, use `self.memory['count'] = self.memory['count'] + 1`.
 
 Attempting restricted operations will cause your bot to be disqualified from the race.
 
@@ -207,15 +212,15 @@ Attempting restricted operations will cause your bot to be disqualified from the
 Follows the track using raycasts:
 
 ```python
-class SimpleFollower:
+class SimpleFollower(GuardedBotBase):
     def __init__(self):
         self.name = "Simple Follower"
-    
+
     def on_tick(self, state):
         left_clear = state.rays[2].distance > 50
         right_clear = state.rays[4].distance > 50
         front_clear = state.rays[0].distance > 30
-        
+
         return {
             "accelerate": front_clear,
             "brake": not front_clear,
@@ -230,7 +235,7 @@ class SimpleFollower:
 Adjusts driving style based on surface:
 
 ```python
-class SurfaceAwareBot:
+class SurfaceAwareBot(GuardedBotBase):
     def __init__(self):
         self.name = "Surface Aware"
     
@@ -273,7 +278,7 @@ Uses checkpoint positions for optimal racing line:
 ```python
 import math
 
-class CheckpointNavigator:
+class CheckpointNavigator(GuardedBotBase):
     def __init__(self):
         self.name = "Navigator"
     

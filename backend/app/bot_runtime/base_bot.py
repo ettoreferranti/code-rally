@@ -5,11 +5,27 @@ All user bots should inherit from BaseBot or implement its interface.
 This class serves as documentation and a template for bot development.
 """
 
-from typing import Optional
+from typing import Optional, Any
 from app.bot_runtime.types import BotGameState, BotActions, CollisionEvent
 
 
-class BaseBot:
+class GuardedBotBase:
+    """
+    Base class that provides guarded attribute access for RestrictedPython.
+
+    This class is required for bots to work in the sandbox environment.
+    """
+
+    def __guarded_setattr__(self, name: str, value: Any) -> None:
+        """Allow attribute assignment in RestrictedPython sandbox."""
+        object.__setattr__(self, name, value)
+
+    def __guarded_delattr__(self, name: str) -> None:
+        """Allow attribute deletion in RestrictedPython sandbox."""
+        object.__delattr__(self, name)
+
+
+class BaseBot(GuardedBotBase):
     """
     Base class for all racing bots.
 
