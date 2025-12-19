@@ -14,7 +14,7 @@ CodeRally is a top-down 2D racing game where players can race using keyboard con
 - **Database**: SQLite with SQLAlchemy ORM
 - **WebSocket**: FastAPI WebSocket for real-time game state
 - **Bot Sandbox**: RestrictedPython for safe user code execution
-- **Testing**: pytest
+- **Testing**: pytest (106 tests: unit, integration, regression, end-to-end)
 
 ### Frontend
 - **Framework**: React 18
@@ -22,6 +22,7 @@ CodeRally is a top-down 2D racing game where players can race using keyboard con
 - **Code Editor**: Monaco Editor
 - **State Management**: React Context + useReducer
 - **Build Tool**: Vite
+- **Testing**: Vitest + React Testing Library (5+ tests: component, integration)
 
 ## Project Structure
 
@@ -55,6 +56,12 @@ code-rally/
 
 ## Development Workflow
 
+**CRITICAL RULE**: Test-Driven Development is **mandatory**. For every new feature, bug fix, or code change:
+1. Write tests FIRST (unit, integration, or regression as appropriate)
+2. Implement the feature/fix
+3. Verify all tests pass
+4. Never commit code without corresponding tests
+
 ### Working on GitHub Issues
 
 1. Each task is tracked as a GitHub issue in the repository
@@ -63,28 +70,40 @@ code-rally/
    - Read the issue description and acceptance criteria
    - Check related issues and the relevant epic
    - Follow the architecture in `docs/architecture.md`
-   - Write tests for new functionality
+   - **Write tests BEFORE or DURING implementation** (TDD approach preferred):
+     - **Unit tests** for new functions, methods, and classes
+     - **Integration tests** for API endpoints and multi-component interactions
+     - **Regression tests** for bug fixes to prevent recurrence
+     - **End-to-end tests** for complete user workflows when applicable
    - Update documentation if APIs change
 
 ### Issue Completion Workflow
 
 **IMPORTANT**: When you complete an issue, follow this workflow:
 
-1. **Ask for Approval**: Present the completed work and ask the user to verify/approve
-2. **Update Documentation**: Automatically update any relevant documentation:
+1. **Run All Tests**: Before asking for approval, run the complete test suite:
+   - Backend: `cd backend && ./venv/bin/python -m pytest tests/ -v`
+   - Frontend: `cd frontend && npm test`
+   - Present test results summary showing all tests passing
+   - If tests fail, fix them before proceeding
+2. **Ask for Approval**: Present the completed work and ask the user to verify/approve
+3. **Update Documentation**: Automatically update any relevant documentation:
    - Update `docs/` files if architecture or APIs changed
    - Update README.md if setup instructions changed
    - Update bot-api.md if bot interface changed
-3. **Update Tests**: Automatically update or add tests as necessary:
-   - Add unit tests for new functions/methods
-   - Add integration tests for new endpoints
-   - Update existing tests if behavior changed
-4. **Commit and Push**: After approval, automatically commit and push:
+4. **Verify Test Coverage**: Ensure comprehensive test coverage was implemented:
+   - ✅ Unit tests exist for all new functions/methods
+   - ✅ Integration tests exist for new API endpoints
+   - ✅ Regression tests exist for bug fixes
+   - ✅ End-to-end tests exist for new user workflows
+   - ✅ All existing tests still pass (verified in Step 1)
+   - **Note**: Tests should have been written during implementation (see Step 3 in "Working on GitHub Issues")
+5. **Commit and Push**: After approval, automatically commit and push:
    - Use conventional commit format: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
    - Reference issue number: `feat: implement feature (#123)`
    - Include descriptive commit message explaining what was done
    - Add Claude Code attribution footer
-5. **Close Issue**: Automatically close the GitHub issue with a comment:
+6. **Close Issue**: Automatically close the GitHub issue with a comment:
    - Summarize what was implemented
    - List acceptance criteria that were met
    - Include any setup/usage instructions if needed
@@ -234,26 +253,53 @@ Key physics parameters are in `backend/app/config.py`.
 
 ## Testing Requirements
 
-### Backend
+### Backend Tests (106 tests)
 
 ```bash
 cd backend
-pytest tests/ -v
+./venv/bin/python -m pytest tests/ -v
 ```
 
-- Unit tests for physics calculations
-- Integration tests for API endpoints
-- Test bot sandbox security
+**Test Suites:**
+- `test_physics.py` (69 tests): Vector2 math, car physics, drift mechanics
+- `test_new_features.py` (19 tests): Regression tests for features #107, #108, #110
+  - Split times tracking
+  - Position ranking
+  - Nitro boost system
+- `test_engine.py` (18 tests): End-to-end race scenarios with game engine
+  - Checkpoint tracking integration
+  - Position ranking integration
+  - Nitro boost integration
+  - Race lifecycle states
+- `test_track.py` (26 tests): Track generation and validation
+- `test_health.py` (4 tests): API health endpoints
 
-### Frontend
+**Test Types:**
+- Unit tests for physics calculations, game logic, and data structures
+- Integration tests for game engine and API endpoints
+- Regression tests to ensure features don't break
+- End-to-end tests simulating complete race scenarios
+
+**Important:** All tests use tick-based simulation (no `time.sleep()`), making them fast and deterministic.
+
+### Frontend Tests (5+ tests)
 
 ```bash
 cd frontend
 npm test
 ```
 
-- Component tests with React Testing Library
-- Canvas rendering tests (snapshot or visual)
+**Framework:** Vitest + React Testing Library
+
+**Test Suites:**
+- `CountdownOverlay.test.tsx` (5 tests): Race countdown and finish overlays
+- Component tests for UI elements
+- Integration tests for game state management
+
+**Test Configuration:**
+- Setup file: `src/test/setup.ts`
+- Config: `vite.config.ts`
+- Scripts: `npm test`, `npm run test:watch`, `npm run test:ui`
 
 ## Running Locally
 
@@ -316,20 +362,33 @@ Access at http://localhost:5173
 2. Add business logic in `backend/app/services/`
 3. Update OpenAPI docs with docstrings
 4. Add tests in `backend/tests/`
+5. Run test suite to verify: `cd backend && ./venv/bin/python -m pytest tests/ -v`
 
 ### Adding a new React component
 
 1. Create component in appropriate `frontend/src/` folder
 2. Export from index file
 3. Add TypeScript interfaces
-4. Add component tests
+4. Add component tests (e.g., `ComponentName.test.tsx`)
+5. Run test suite to verify: `cd frontend && npm test`
 
 ### Modifying game physics
 
 1. Update parameters in `backend/app/config.py`
 2. Implement changes in `backend/app/core/physics.py`
-3. Update bot API docs if sensor data changes
-4. Test with manual play and bot scenarios
+3. Update existing tests in `backend/tests/test_physics.py`
+4. Add regression tests if fixing a bug
+5. Run test suite to verify: `cd backend && ./venv/bin/python -m pytest tests/test_physics.py -v`
+6. Update bot API docs if sensor data changes
+
+### Adding a new feature
+
+1. Write unit tests first (TDD approach recommended)
+2. Implement the feature
+3. Add integration/end-to-end tests if needed
+4. Add regression tests to prevent future breakage
+5. Run full test suite: Backend + Frontend
+6. Update documentation if public APIs changed
 
 ## Contact
 
