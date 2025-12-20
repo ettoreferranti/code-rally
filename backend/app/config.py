@@ -100,12 +100,16 @@ class BotConfig:
     EXECUTION_TIMEOUT_MS: int = 10
     MAX_CODE_SIZE_KB: int = 100
     MAX_STORED_VERSIONS: int = 10
-    
+
     # Allowed imports
     ALLOWED_IMPORTS: tuple = ("math",)
-    
+
     # State persistence
     MAX_STATE_SIZE_KB: int = 100
+
+    # Bot execution
+    BOT_TICK_RATE: int = 20  # Hz (bots run at 20Hz, every 3rd physics tick)
+    OPPONENT_VISIBILITY_RADIUS: float = 300.0  # Distance bots can see opponents
 
 
 @dataclass

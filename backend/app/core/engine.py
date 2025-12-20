@@ -6,13 +6,17 @@ managing game state, physics updates, and race progression.
 """
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 from app.core.physics import CarPhysics, CarState, Vector2
 from app.core.track import Track
+from app.core.bot_manager import BotManager, BotError
 from app.config import get_settings
 
 
@@ -61,6 +65,13 @@ class PlayerState:
     points: int = 0  # Points awarded for this race
     dnf: bool = False  # Did Not Finish
 
+    # Bot-specific fields
+    is_bot: bool = False  # Whether this player is controlled by a bot
+    bot_instance: Optional[Any] = None  # Bot instance (if is_bot=True)
+    bot_code: Optional[str] = None  # Bot source code for persistence
+    bot_class_name: Optional[str] = None  # Bot class name
+    bot_error: Optional[str] = None  # Error message if bot failed
+
 
 @dataclass
 class GameState:
@@ -88,6 +99,7 @@ class GameEngine:
         """
         self.settings = get_settings()
         self.physics = CarPhysics()
+        self.bot_manager = BotManager()
 
         self.state = GameState(
             track=track,
@@ -135,6 +147,43 @@ class GameEngine:
         """Remove a player from the game."""
         if player_id in self.state.players:
             del self.state.players[player_id]
+
+    def add_bot_player(self, player_id: str, bot_code: str, bot_class_name: str) -> PlayerState:
+        """
+        Add a bot-controlled player to the game.
+
+        Args:
+            player_id: Unique identifier for the player
+            bot_code: Python source code for the bot
+            bot_class_name: Name of the bot class to instantiate
+
+        Returns:
+            The created PlayerState
+
+        Raises:
+            BotError: If bot code cannot be loaded
+        """
+        # Create player first
+        player = self.add_player(player_id)
+
+        # Load bot
+        try:
+            bot_instance = self.bot_manager.load_bot(bot_code, bot_class_name)
+
+            # Update player state to mark as bot
+            player.is_bot = True
+            player.bot_instance = bot_instance
+            player.bot_code = bot_code
+            player.bot_class_name = bot_class_name
+
+        except BotError as e:
+            # Bot loading failed - mark as error and DQ
+            player.is_bot = True
+            player.bot_error = str(e)
+            player.dnf = True
+            raise
+
+        return player
 
     def update_player_input(self, player_id: str, input_data: PlayerInput) -> None:
         """
@@ -229,6 +278,10 @@ class GameEngine:
 
         # Only update physics during active racing
         if self.state.race_info.status == RaceStatus.RACING:
+            # Run bot logic at 20Hz (every 3rd physics tick)
+            if self.bot_manager.should_run_bot_tick(self.state.tick):
+                self._update_bot_inputs()
+
             # Update each player's physics
             for player in self.state.players.values():
                 if not player.is_finished:
@@ -263,6 +316,49 @@ class GameEngine:
 
                     self._finalize_race()
                     self.state.race_info.status = RaceStatus.FINISHED
+
+    def _update_bot_inputs(self) -> None:
+        """
+        Update inputs for all bot players by executing their on_tick() methods.
+
+        Called at 20Hz (every 3rd physics tick). Handles bot errors gracefully
+        by disqualifying bots that fail.
+        """
+        for player in self.state.players.values():
+            # Skip non-bot players
+            if not player.is_bot:
+                continue
+
+            # Skip bots that have already errored or finished
+            if player.bot_error is not None or player.is_finished or player.dnf:
+                continue
+
+            # Execute bot's on_tick() method
+            try:
+                bot_actions = self.bot_manager.get_bot_actions(
+                    bot_instance=player.bot_instance,
+                    game_state=self.state,
+                    player_id=player.player_id,
+                    track=self.state.track
+                )
+
+                if bot_actions is not None:
+                    # Update player input from bot actions
+                    player.input = PlayerInput(
+                        accelerate=bot_actions.accelerate,
+                        brake=bot_actions.brake,
+                        turn_left=bot_actions.turn_left,
+                        turn_right=bot_actions.turn_right,
+                        nitro=bot_actions.use_nitro
+                    )
+
+            except BotError as e:
+                # Bot execution error - DQ the bot
+                logger.error(f"Bot {player.player_id} error: {str(e)}")
+                player.bot_error = str(e)
+                player.dnf = True
+                # Clear input to prevent further movement
+                player.input = PlayerInput()
 
     def _update_player_physics(self, player: PlayerState) -> None:
         """
@@ -579,13 +675,23 @@ class GameEngine:
 
             # Only count if moving forward through checkpoint
             if dot_product > 0:
-                player.checkpoints_passed.add(player.current_checkpoint)
+                checkpoint_index = player.current_checkpoint
+                player.checkpoints_passed.add(checkpoint_index)
                 player.current_checkpoint += 1
 
                 # Record split time (elapsed time since race start)
+                split_time = 0.0
                 if self.state.race_info.start_time is not None:
-                    elapsed_time = time.time() - self.state.race_info.start_time
-                    player.split_times.append(elapsed_time)
+                    split_time = time.time() - self.state.race_info.start_time
+                    player.split_times.append(split_time)
+
+                # Call bot's on_checkpoint callback if this is a bot
+                if player.is_bot and player.bot_instance is not None:
+                    self.bot_manager.call_on_checkpoint(
+                        bot_instance=player.bot_instance,
+                        checkpoint_index=checkpoint_index,
+                        split_time=split_time
+                    )
 
         # Update previous position for next frame
         player._prev_position = Vector2(curr_x, curr_y)
@@ -631,6 +737,22 @@ class GameEngine:
             if not player.is_finished:
                 player.is_finished = True
                 player.finish_time = time.time()
+
+                # Calculate race time
+                race_time = 0.0
+                if self.state.race_info.start_time is not None:
+                    race_time = player.finish_time - self.state.race_info.start_time
+
+                # Call bot's on_finish callback if this is a bot
+                # Note: Position will be updated next tick, use current position
+                if player.is_bot and player.bot_instance is not None:
+                    # Position will be finalized in _update_race_positions()
+                    final_position = player.position if player.position is not None else 1
+                    self.bot_manager.call_on_finish(
+                        bot_instance=player.bot_instance,
+                        finish_time=race_time,
+                        final_position=final_position
+                    )
 
                 # Track first finisher and start grace period
                 if self.state.race_info.first_finisher_time is None:

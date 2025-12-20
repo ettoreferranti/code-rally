@@ -156,6 +156,17 @@ def _create_safe_globals() -> Dict[str, Any]:
         'GuardedBotBase': GuardedBotBase,
     })
 
+    # Import and make bot runtime types available
+    # Bots shouldn't need to import these - they should be in global scope
+    from app.bot_runtime.base_bot import BaseBot
+    from app.bot_runtime.types import BotActions, BotGameState
+
+    safe_dict.update({
+        'BaseBot': BaseBot,
+        'BotActions': BotActions,
+        'BotGameState': BotGameState,
+    })
+
     return safe_dict
 
 
