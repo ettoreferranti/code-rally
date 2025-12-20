@@ -17,6 +17,11 @@ export default function MultiplayerRace() {
   const [raceResults, setRaceResults] = useState<PlayerResult[] | null>(null);
   const [showResults, setShowResults] = useState(false);
 
+  // Parse seed from URL or generate random
+  const urlParams = new URLSearchParams(window.location.search);
+  const seedParam = urlParams.get('seed');
+  const seed = seedParam ? parseInt(seedParam, 10) : Math.floor(Math.random() * 1000000);
+
   const inputState = useKeyboardInput();
   const wsRef = useRef<GameWebSocketClient | null>(null);
   const inputIntervalRef = useRef<number | null>(null);
@@ -139,7 +144,7 @@ export default function MultiplayerRace() {
     });
 
     wsRef.current = ws;
-    ws.connect(undefined, 'medium', 42);  // Connect with seed 42 for consistent track
+    ws.connect(undefined, 'medium', seed);  // Connect with random or URL-specified seed
 
     // Cleanup on unmount
     return () => {
@@ -238,12 +243,22 @@ export default function MultiplayerRace() {
   return (
     <div className="p-8">
       <h2 className="text-3xl font-bold mb-4">Multiplayer Rally Stage (Server-Authoritative)</h2>
-      <div className="mb-4 flex gap-4 items-center">
+      <div className="mb-4 flex gap-4 items-center flex-wrap">
         <div className="text-gray-300">
           <span className="font-semibold">Session:</span> {sessionId?.substring(0, 8)}...
         </div>
         <div className="text-gray-300">
           <span className="font-semibold">Player ID:</span> {playerId?.substring(0, 8)}...
+        </div>
+        <div className="text-gray-300">
+          <span className="font-semibold">Track Seed:</span> {seed}
+          <button
+            onClick={() => navigator.clipboard.writeText(seed.toString())}
+            className="ml-2 px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600"
+            title="Copy seed to clipboard"
+          >
+            📋 Copy
+          </button>
         </div>
         {!raceStarted && (
           <button
@@ -253,10 +268,17 @@ export default function MultiplayerRace() {
             Start Race
           </button>
         )}
+        <button
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          title="Generate new random track"
+        >
+          🔄 New Track
+        </button>
       </div>
 
       <p className="text-gray-300 mb-4">
-        Physics running on server at 60Hz. Client receives state updates and renders.
+        Physics running on server at 60Hz. Each reload generates a new random track! Share the seed with friends to race on the same track.
       </p>
 
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
@@ -332,6 +354,8 @@ export default function MultiplayerRace() {
           <li>Obstacle collision handled server-side</li>
           <li>Checkpoint progress tracked server-side</li>
           <li>Multi-player support (connect with same session ID)</li>
+          <li>Random track generation - each reload creates a new track!</li>
+          <li>Reproducible tracks - use <code>?seed=123</code> in URL to load a specific track</li>
         </ul>
       </div>
     </div>

@@ -10,6 +10,11 @@ export default function Practice() {
   const [error, setError] = useState<string | null>(null);
   const inputState = useKeyboardInput();
 
+  // Parse seed from URL or generate random
+  const urlParams = new URLSearchParams(window.location.search);
+  const seedParam = urlParams.get('seed');
+  const seed = seedParam ? parseInt(seedParam, 10) : Math.floor(Math.random() * 1000000);
+
   // Initialize game state once - fetch track from API
   useEffect(() => {
     async function initializeRace() {
@@ -18,7 +23,7 @@ export default function Practice() {
         setError(null);
 
         // Fetch track from backend API
-        const track = await generateTrack({ difficulty: 'medium', seed: 42 });
+        const track = await generateTrack({ difficulty: 'medium', seed });
 
         // Create initial car state at start position
         const car = {
@@ -62,6 +67,7 @@ export default function Practice() {
     }
 
     initializeRace();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Game loop callback to update state (memoized to prevent loop restarts)
@@ -104,8 +110,27 @@ export default function Practice() {
   return (
     <div className="p-8">
       <h2 className="text-3xl font-bold mb-4">Practice Mode</h2>
+      <div className="mb-4 flex gap-4 items-center flex-wrap">
+        <div className="text-gray-300">
+          <span className="font-semibold">Track Seed:</span> {seed}
+          <button
+            onClick={() => navigator.clipboard.writeText(seed.toString())}
+            className="ml-2 px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600"
+            title="Copy seed to clipboard"
+          >
+            📋 Copy
+          </button>
+        </div>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          title="Generate new random track"
+        >
+          🔄 New Track
+        </button>
+      </div>
       <p className="text-gray-300 mb-4">
-        Practice driving with client-side physics. Perfect for testing and bot development!
+        Practice driving with client-side physics. Each reload generates a new random track! Share the seed to practice on the same track.
       </p>
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
         <GameCanvas gameState={gameState} width={800} height={600} />
@@ -157,6 +182,8 @@ export default function Practice() {
         <ul className="list-disc list-inside ml-4 mt-2">
           <li>Real-time physics simulation at 60Hz</li>
           <li>Procedurally generated tracks from backend API</li>
+          <li>Random track generation - each reload creates a new track!</li>
+          <li>Reproducible tracks - use <code>?seed=123</code> in URL to load a specific track</li>
           <li>Containment boundaries (outer walls) with variable distance from track</li>
           <li>Dynamic obstacles (rocks, trees, buildings) in off-road areas</li>
           <li>Elastic collision physics for walls and obstacles</li>
@@ -169,6 +196,7 @@ export default function Practice() {
           <li>Smooth camera following player</li>
           <li>60 FPS rendering with fixed timestep physics</li>
           <li>Stage completion timer and HUD</li>
+          <li>Nitro boost system (Space bar, 1.5x speed for 2 seconds)</li>
         </ul>
       </div>
     </div>

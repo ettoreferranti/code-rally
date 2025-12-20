@@ -35,7 +35,15 @@
       "Bash(./run_dev.sh:*)",
       "Bash(curl:*)",
       "Bash(find:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(cat:*)",
+      "Bash(python:*)",
+      "Bash(timeout 3 ./venv/bin/python:*)",
+      "Bash(/Users/ettore/Code/code-rally/backend/venv/bin/python:*)",
+      "Bash(npm test)",
+      "Bash(git reset:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []
