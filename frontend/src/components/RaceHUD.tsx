@@ -35,8 +35,9 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
   const calculateSpeed = (): number => {
     if (!car) return 0;
     const velocityMagnitude = Math.sqrt(car.velocity.x ** 2 + car.velocity.y ** 2);
-    // Convert to km/h (multiply by 3.6 for rough approximation)
-    return Math.round(velocityMagnitude * 3.6);
+    // Convert game units/s to realistic km/h
+    // MAX_SPEED (300 units/s) should display as ~180 km/h (rally car top speed)
+    return Math.round(velocityMagnitude * 0.6);
   };
 
   const speed = calculateSpeed();
