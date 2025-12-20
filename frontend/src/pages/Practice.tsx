@@ -10,10 +10,12 @@ export default function Practice() {
   const [error, setError] = useState<string | null>(null);
   const inputState = useKeyboardInput();
 
-  // Parse seed from URL or generate random
-  const urlParams = new URLSearchParams(window.location.search);
-  const seedParam = urlParams.get('seed');
-  const seed = seedParam ? parseInt(seedParam, 10) : Math.floor(Math.random() * 1000000);
+  // Parse seed from URL or generate random (memoized to only calculate once)
+  const seed = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const seedParam = urlParams.get('seed');
+    return seedParam ? parseInt(seedParam, 10) : Math.floor(Math.random() * 1000000);
+  }, []);
 
   // Initialize game state once - fetch track from API
   useEffect(() => {

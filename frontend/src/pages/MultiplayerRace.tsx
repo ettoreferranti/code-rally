@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { GameCanvas, useKeyboardInput } from '../game';
 import type { GameState, Track, PlayerResult } from '../game/types';
 import { RaceHUD } from '../components/RaceHUD';
@@ -17,10 +17,12 @@ export default function MultiplayerRace() {
   const [raceResults, setRaceResults] = useState<PlayerResult[] | null>(null);
   const [showResults, setShowResults] = useState(false);
 
-  // Parse seed from URL or generate random
-  const urlParams = new URLSearchParams(window.location.search);
-  const seedParam = urlParams.get('seed');
-  const seed = seedParam ? parseInt(seedParam, 10) : Math.floor(Math.random() * 1000000);
+  // Parse seed from URL or generate random (memoized to only calculate once)
+  const seed = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const seedParam = urlParams.get('seed');
+    return seedParam ? parseInt(seedParam, 10) : Math.floor(Math.random() * 1000000);
+  }, []);
 
   const inputState = useKeyboardInput();
   const wsRef = useRef<GameWebSocketClient | null>(null);
