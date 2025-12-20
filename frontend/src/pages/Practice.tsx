@@ -29,7 +29,10 @@ export default function Practice() {
           is_drifting: false,
           drift_angle: 0,
           throttle: 0,
-          is_off_track: false
+          is_off_track: false,
+          nitro_charges: 2,  // Default nitro charges
+          nitro_active: false,
+          nitro_remaining_ticks: 0
         };
 
         // Create game state

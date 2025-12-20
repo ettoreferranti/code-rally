@@ -48,7 +48,12 @@ const PHYSICS_CONFIG = {
   // Collision
   COLLISION_ELASTICITY: 0.7,  // Bounce coefficient (0 = no bounce, 1 = perfect bounce)
   CAR_RADIUS: 10,  // Car radius for collision detection
-  MIN_COLLISION_SPEED: 5.0  // Minimum speed to trigger bounce (prevent jitter)
+  MIN_COLLISION_SPEED: 5.0,  // Minimum speed to trigger bounce (prevent jitter)
+
+  // Nitro
+  DEFAULT_NITRO_CHARGES: 2,  // Starting nitro charges
+  DEFAULT_NITRO_DURATION_TICKS: 120,  // 2 seconds at 60 Hz
+  NITRO_SPEED_MULTIPLIER: 1.5  // 50% speed boost
 };
 
 /**
@@ -123,6 +128,9 @@ export class CarPhysics {
     const trackStatus = isOnTrack(track, newState.position);
     newState.is_off_track = !trackStatus.onTrack;
 
+    // Update nitro state
+    newState = this.updateNitro(newState, input.nitro);
+
     // Update throttle state (smoothly ramp up/down)
     newState = this.updateThrottle(newState, input.accelerate, dt);
 
@@ -164,6 +172,35 @@ export class CarPhysics {
     return newState;
   }
 
+  private updateNitro(state: CarState, useNitro: boolean): CarState {
+    let nitroCharges = state.nitro_charges;
+    let nitroActive = state.nitro_active;
+    let nitroRemainingTicks = state.nitro_remaining_ticks;
+
+    // Activate nitro if button pressed and we have charges
+    if (useNitro && !nitroActive && nitroCharges > 0) {
+      nitroActive = true;
+      nitroCharges -= 1;
+      nitroRemainingTicks = PHYSICS_CONFIG.DEFAULT_NITRO_DURATION_TICKS;
+    }
+
+    // Deplete nitro over time
+    if (nitroActive) {
+      nitroRemainingTicks -= 1;
+      if (nitroRemainingTicks <= 0) {
+        nitroActive = false;
+        nitroRemainingTicks = 0;
+      }
+    }
+
+    return {
+      ...state,
+      nitro_charges: nitroCharges,
+      nitro_active: nitroActive,
+      nitro_remaining_ticks: nitroRemainingTicks
+    };
+  }
+
   private updateThrottle(state: CarState, isAccelerating: boolean, dt: number): CarState {
     // Calculate target throttle (1 if accelerating, 0 if not)
     const targetThrottle = isAccelerating ? 1.0 : 0.0;
@@ -202,8 +239,11 @@ export class CarPhysics {
     );
     let newVelocity = Vector2Utils.add(state.velocity, acceleration);
 
-    // Clamp to max speed (reduced if off-track)
+    // Clamp to max speed (with nitro multiplier if active, reduced if off-track)
     let maxSpeed = PHYSICS_CONFIG.MAX_SPEED;
+    if (state.nitro_active) {
+      maxSpeed *= PHYSICS_CONFIG.NITRO_SPEED_MULTIPLIER;
+    }
     if (isOffTrack) {
       maxSpeed *= PHYSICS_CONFIG.OFF_TRACK_SPEED_MULTIPLIER;
     }
