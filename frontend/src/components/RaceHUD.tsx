@@ -31,6 +31,16 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
 
   const elapsedTime = calculateElapsedTime();
 
+  // Calculate speed from velocity magnitude (convert to km/h for display)
+  const calculateSpeed = (): number => {
+    if (!car) return 0;
+    const velocityMagnitude = Math.sqrt(car.velocity.x ** 2 + car.velocity.y ** 2);
+    // Convert to km/h (multiply by 3.6 for rough approximation)
+    return Math.round(velocityMagnitude * 3.6);
+  };
+
+  const speed = calculateSpeed();
+
   const formatTime = (seconds: number): string => {
     // Ensure seconds is a valid number
     if (!isFinite(seconds) || seconds < 0) {
@@ -102,7 +112,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
       </div>
 
       {/* Time */}
-      <div>
+      <div style={{ marginBottom: '10px' }}>
         <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>
           {raceInfo.isFinished ? 'FINISH TIME' : 'TIME'}
         </div>
@@ -110,6 +120,18 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({ raceInfo, car }) => {
           {formatTime(elapsedTime)}
         </div>
       </div>
+
+      {/* Speedometer */}
+      {car && !raceInfo.isFinished && (
+        <div>
+          <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>
+            SPEED
+          </div>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196F3' }}>
+            {speed} <span style={{ fontSize: '14px', color: '#aaa' }}>km/h</span>
+          </div>
+        </div>
+      )}
 
       {/* Finish Message */}
       {raceInfo.isFinished && (
