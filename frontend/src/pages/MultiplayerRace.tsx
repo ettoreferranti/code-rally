@@ -31,6 +31,13 @@ export default function MultiplayerRace() {
   const playerIdRef = useRef<string | null>(null);
   const hasShownResultsRef = useRef<boolean>(false);
   const hasClosedResultsRef = useRef<boolean>(false);
+  const lastInputRef = useRef<InputState>({
+    accelerate: false,
+    brake: false,
+    turnLeft: false,
+    turnRight: false,
+    nitro: false,
+  });
 
   // Log when game state changes
   useEffect(() => {
@@ -157,39 +164,37 @@ export default function MultiplayerRace() {
     };
   }, []);
 
-  // Send inputs to server at regular intervals (60 FPS)
+  // Send inputs to server only when they change
   useEffect(() => {
     if (!wsRef.current || !wsRef.current.isConnected()) {
-      console.log('Not setting up input interval - WebSocket not connected');
       return;
     }
 
-    // Clear existing interval
-    if (inputIntervalRef.current) {
-      clearInterval(inputIntervalRef.current);
+    // Don't send inputs during countdown or waiting
+    if (gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'waiting') {
+      return;
     }
 
-    console.log('Setting up input interval at 60 FPS');
+    // Check if input state has changed
+    const lastInput = lastInputRef.current;
+    const hasChanged =
+      inputState.accelerate !== lastInput.accelerate ||
+      inputState.brake !== lastInput.brake ||
+      inputState.turnLeft !== lastInput.turnLeft ||
+      inputState.turnRight !== lastInput.turnRight ||
+      inputState.nitro !== lastInput.nitro;
 
-    // Send inputs at 60 FPS (but only during racing, not during countdown)
-    inputIntervalRef.current = window.setInterval(() => {
-      // Don't send inputs during countdown or waiting
-      if (gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'waiting') {
-        return;
-      }
-
+    if (hasChanged) {
       // Only log when there's actual input
       if (inputState.accelerate || inputState.brake || inputState.turnLeft || inputState.turnRight || inputState.nitro) {
-        console.log('Sending input:', inputState);
+        console.log('Input changed, sending:', inputState);
+      } else {
+        console.log('Input released (all keys up)');
       }
-      wsRef.current?.sendInput(inputState);
-    }, 1000 / 60);
 
-    return () => {
-      if (inputIntervalRef.current) {
-        clearInterval(inputIntervalRef.current);
-      }
-    };
+      wsRef.current.sendInput(inputState);
+      lastInputRef.current = { ...inputState };
+    }
   }, [inputState, gameState?.raceInfo.raceStatus]);
 
   const handleStartRace = () => {
@@ -310,7 +315,7 @@ export default function MultiplayerRace() {
           {gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'waiting' ? (
             <span className="text-yellow-400 font-semibold">🔒 Controls locked during countdown</span>
           ) : (
-            <span>Inputs are sent to server at 60 FPS</span>
+            <span>Inputs sent only when changed (optimized network traffic)</span>
           )}
         </p>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -351,7 +356,7 @@ export default function MultiplayerRace() {
         <p>Server-Authoritative Features:</p>
         <ul className="list-disc list-inside ml-4 mt-2">
           <li>Server runs physics at fixed 60Hz tick rate</li>
-          <li>Client sends inputs at 60 FPS</li>
+          <li>Client sends inputs only when changed (optimized network traffic)</li>
           <li>Server broadcasts state updates at 60 FPS</li>
           <li>Obstacle collision handled server-side</li>
           <li>Checkpoint progress tracked server-side</li>
