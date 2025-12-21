@@ -1,45 +1,166 @@
 import { useState, useEffect } from 'react';
 import { BotEditor, DEFAULT_BOT_CODE } from '../components/BotEditor';
+import { useUsername } from '../hooks/useUsername';
+import { getAllUsers, registerUser, deleteUser, getUserBots, getBot, createBot, updateBot, deleteBot, type User, type Bot, type BotListItem } from '../services/botApi';
+import { migrateLocalStorageToDatabase } from '../utils/migrateLocalStorage';
 
 export default function Editor() {
+  const { username, loading: usernameLoading, promptAndSetUsername, clearUsername } = useUsername();
+
   const [code, setCode] = useState<string>(DEFAULT_BOT_CODE);
   const [botName, setBotName] = useState<string>('MyBot');
+  const [bots, setBots] = useState<BotListItem[]>([]);
+  const [currentBot, setCurrentBot] = useState<Bot | null>(null);
   const [saved, setSaved] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [showUserModal, setShowUserModal] = useState<boolean>(false);
+  const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  const [newUsername, setNewUsername] = useState<string>('');
 
-  // Load saved code from localStorage on mount
+  // Show user selection modal on first visit or if no username
   useEffect(() => {
-    const savedCode = localStorage.getItem('bot_code');
-    const savedName = localStorage.getItem('bot_name');
-
-    if (savedCode) {
-      setCode(savedCode);
+    if (!usernameLoading && !username) {
+      loadAvailableUsers();
+      setShowUserModal(true);
     }
-    if (savedName) {
-      setBotName(savedName);
-    }
-  }, []);
+  }, [usernameLoading, username]);
 
-  const handleSave = () => {
+  const loadAvailableUsers = async () => {
     try {
-      // Save to localStorage
-      localStorage.setItem('bot_code', code);
-      localStorage.setItem('bot_name', botName);
+      const users = await getAllUsers();
+      setAvailableUsers(users);
+    } catch (err) {
+      console.error('Failed to load users:', err);
+      setAvailableUsers([]);
+    }
+  };
 
-      setSaved(true);
+  // Load bots when username is available
+  useEffect(() => {
+    if (username) {
+      loadUserBots();
+
+      // Run migration once
+      migrateLocalStorageToDatabase(username).then((result) => {
+        if (result.migrated) {
+          console.log(`Migrated bot "${result.botName}" from localStorage`);
+          // Reload bots after migration
+          loadUserBots();
+        }
+      }).catch((err) => {
+        console.error('Migration failed:', err);
+      });
+    }
+  }, [username]);
+
+  const loadUserBots = async () => {
+    if (!username) return;
+
+    try {
+      setLoading(true);
+      const userBots = await getUserBots(username);
+      setBots(userBots);
+
+      // Load the most recent bot if exists
+      if (userBots.length > 0 && !currentBot) {
+        const botDetails = await getBot(userBots[0].id);
+        setCurrentBot(botDetails);
+        setCode(botDetails.code);
+        setBotName(botDetails.name);
+      }
+    } catch (err) {
+      console.error('Failed to load bots:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load bots');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!username) {
+      setError('Please set a username first');
+      return;
+    }
+
+    try {
+      setLoading(true);
       setError(null);
 
-      // Clear saved indicator after 2 seconds
+      if (currentBot) {
+        // Update existing bot
+        const updated = await updateBot(currentBot.id, { name: botName, code });
+        setCurrentBot(updated);
+      } else {
+        // Create new bot
+        const newBot = await createBot(username, { name: botName, code });
+        setCurrentBot(newBot);
+        // Reload bots list
+        await loadUserBots();
+      }
+
+      setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNewBot = () => {
+    if (confirm('Create a new bot? Unsaved changes to the current bot will be lost.')) {
+      setCurrentBot(null);
+      setCode(DEFAULT_BOT_CODE);
+      setBotName('MyBot');
+      setSaved(false);
+      setError(null);
+    }
+  };
+
+  const handleDeleteBot = async () => {
+    if (!currentBot) return;
+
+    if (confirm(`Delete bot "${currentBot.name}"? This cannot be undone.`)) {
+      try {
+        setLoading(true);
+        await deleteBot(currentBot.id);
+
+        // Clear current bot
+        setCurrentBot(null);
+        setCode(DEFAULT_BOT_CODE);
+        setBotName('MyBot');
+
+        // Reload bots list
+        await loadUserBots();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete bot');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleSelectBot = async (botId: number) => {
+    try {
+      setLoading(true);
+      const bot = await getBot(botId);
+      setCurrentBot(bot);
+      setCode(bot.code);
+      setBotName(bot.name);
+      setSaved(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load bot');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleReset = () => {
     if (confirm('Reset to default template? This will discard your current code.')) {
       setCode(DEFAULT_BOT_CODE);
-      setBotName('MyBot');
+      setBotName(currentBot ? currentBot.name : 'MyBot');
       setSaved(false);
     }
   };
@@ -73,14 +194,149 @@ export default function Editor() {
     reader.readAsText(file);
   };
 
+  const handleSelectExistingUser = async (selectedUsername: string) => {
+    try {
+      setLoading(true);
+      // Register user (idempotent - will return existing user)
+      const user = await registerUser(selectedUsername);
+      localStorage.setItem('coderally_username', user.username);
+      setShowUserModal(false);
+      window.location.reload(); // Reload to update state
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to select user');
+      setLoading(false);
+    }
+  };
+
+  const handleCreateNewUser = async () => {
+    if (!newUsername.trim()) {
+      setError('Please enter a username');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const user = await registerUser(newUsername.trim());
+      localStorage.setItem('coderally_username', user.username);
+      setShowUserModal(false);
+      setNewUsername('');
+      window.location.reload(); // Reload to update state
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create user');
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteUser = async (userToDelete: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent selecting the user when clicking delete
+
+    if (!confirm(`Delete user "${userToDelete}" and all their bots? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await deleteUser(userToDelete);
+
+      // If we deleted the current user, clear username
+      if (userToDelete === username) {
+        clearUsername();
+      }
+
+      // Reload the user list
+      await loadAvailableUsers();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSwitchUser = () => {
+    if (confirm('Switch user? You will be logged out and can log in as a different user.')) {
+      clearUsername();
+      setBots([]);
+      setCurrentBot(null);
+      setCode(DEFAULT_BOT_CODE);
+      setBotName('MyBot');
+      setSaved(false);
+      setError(null);
+      // Show user modal
+      loadAvailableUsers();
+      setShowUserModal(true);
+    }
+  };
+
   return (
     <div className="p-8">
-      <h2 className="text-3xl font-bold mb-4">Bot Editor</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-3xl font-bold">Bot Editor</h2>
+        {username && (
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-gray-400">
+              Logged in as <span className="text-green-400 font-semibold">{username}</span>
+            </div>
+            <button
+              onClick={handleSwitchUser}
+              className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition"
+              title="Switch to a different user"
+            >
+              🔄 Switch User
+            </button>
+          </div>
+        )}
+      </div>
 
       <p className="text-gray-300 mb-6">
         Write your racing bot using Python. Your bot inherits from <code className="bg-gray-700 px-2 py-1 rounded">BaseBot</code> and
         implements <code className="bg-gray-700 px-2 py-1 rounded">on_tick()</code> to control the car.
       </p>
+
+      {/* Bot Management Section */}
+      {username && (
+        <div className="mb-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
+          <div className="flex items-center gap-4 mb-3">
+            <label className="text-sm font-semibold">My Bots</label>
+            <button
+              onClick={handleNewBot}
+              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading}
+            >
+              ➕ New Bot
+            </button>
+            {currentBot && (
+              <button
+                onClick={handleDeleteBot}
+                className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={loading}
+              >
+                🗑️ Delete Bot
+              </button>
+            )}
+          </div>
+
+          {bots.length > 0 ? (
+            <select
+              value={currentBot?.id || ''}
+              onChange={(e) => handleSelectBot(Number(e.target.value))}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading}
+            >
+              {!currentBot && <option value="">-- Select a bot --</option>}
+              {bots.map((bot) => (
+                <option key={bot.id} value={bot.id}>
+                  {bot.name} (updated {new Date(bot.updated_at).toLocaleDateString()})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-sm text-gray-400 italic">
+              No bots yet. Click "New Bot" to create your first bot!
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Bot Name Input */}
       <div className="mb-4">
@@ -89,8 +345,9 @@ export default function Editor() {
           type="text"
           value={botName}
           onChange={(e) => setBotName(e.target.value)}
-          className="px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white w-full max-w-md"
+          className="px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white w-full max-w-md disabled:opacity-50 disabled:cursor-not-allowed"
           placeholder="MyBot"
+          disabled={loading || !username}
         />
       </div>
 
@@ -98,33 +355,37 @@ export default function Editor() {
       <div className="mb-4 flex gap-3 flex-wrap items-center">
         <button
           onClick={handleSave}
-          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition"
+          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading || !username}
         >
-          💾 Save to Browser
+          💾 {currentBot ? 'Update Bot' : 'Save New Bot'}
         </button>
 
         <button
           onClick={handleDownload}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition disabled:opacity-50"
+          disabled={loading}
         >
           ⬇️ Download .py
         </button>
 
-        <label className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition cursor-pointer">
+        <label className={`px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition cursor-pointer ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}>
           ⬆️ Upload .py
           <input
             type="file"
             accept=".py"
             onChange={handleFileUpload}
             className="hidden"
+            disabled={loading}
           />
         </label>
 
         <button
           onClick={handleReset}
-          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
+          className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading}
         >
-          🔄 Reset to Template
+          🔄 Reset Code
         </button>
 
         {saved && (
@@ -136,6 +397,12 @@ export default function Editor() {
         {error && (
           <span className="px-3 py-1 bg-red-900/50 text-red-400 rounded border border-red-600">
             ✗ {error}
+          </span>
+        )}
+
+        {loading && (
+          <span className="px-3 py-1 bg-blue-900/50 text-blue-400 rounded border border-blue-600">
+            ⏳ Loading...
           </span>
         )}
       </div>
@@ -232,6 +499,86 @@ export default function Editor() {
           (Bot submission API integration coming soon)
         </p>
       </div>
+
+      {/* User Selection Modal */}
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-600">
+            <h3 className="text-2xl font-bold mb-4">Select or Create User</h3>
+
+            {availableUsers.length > 0 && (
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold mb-2 text-gray-300">Existing Users</h4>
+                <div className="max-h-48 overflow-y-auto bg-gray-900 rounded border border-gray-700">
+                  {availableUsers.map((user) => (
+                    <div
+                      key={user.id}
+                      className="flex items-center justify-between px-4 py-3 hover:bg-gray-700 transition border-b border-gray-700 last:border-b-0"
+                    >
+                      <button
+                        onClick={() => handleSelectExistingUser(user.username)}
+                        className="flex-1 text-left"
+                        disabled={loading}
+                      >
+                        <div className="font-semibold text-white">{user.username}</div>
+                        <div className="text-xs text-gray-400">
+                          Created {new Date(user.created_at).toLocaleDateString()}
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteUser(user.username, e)}
+                        className="ml-3 px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition disabled:opacity-50"
+                        disabled={loading}
+                        title="Delete this user and all their bots"
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold mb-2 text-gray-300">Create New User</h4>
+              <input
+                type="text"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateNewUser()}
+                placeholder="Enter new username (3-50 chars)"
+                className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50"
+                disabled={loading}
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Letters, numbers, dashes, and underscores only
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleCreateNewUser}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={loading || !newUsername.trim()}
+              >
+                ➕ Create User
+              </button>
+            </div>
+
+            {error && (
+              <div className="mt-4 px-3 py-2 bg-red-900/50 text-red-400 rounded border border-red-600 text-sm">
+                {error}
+              </div>
+            )}
+
+            {loading && (
+              <div className="mt-4 text-center text-gray-400 text-sm">
+                ⏳ Loading...
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

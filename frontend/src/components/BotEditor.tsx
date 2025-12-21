@@ -50,17 +50,15 @@ export const DEFAULT_BOT_CODE = `class MyBot(BaseBot):
 
     def on_checkpoint(self, checkpoint_index, split_time):
         """Called when passing a checkpoint."""
-        # Track progress in memory
-        if 'checkpoints_passed' not in self.memory:
-            self.memory['checkpoints_passed'] = 0
-        self.memory['checkpoints_passed'] += 1
+        # Track progress in memory (avoid += for RestrictedPython)
+        count = self.memory.get('checkpoints_passed', 0)
+        self.memory['checkpoints_passed'] = count + 1
 
     def on_finish(self, finish_time, final_position):
         """Called when finishing the race."""
         # Save best time
-        if 'best_time' not in self.memory:
-            self.memory['best_time'] = finish_time
-        elif finish_time < self.memory['best_time']:
+        best = self.memory.get('best_time', None)
+        if best is None or finish_time < best:
             self.memory['best_time'] = finish_time
 `;
 

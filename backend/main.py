@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from app.config import get_settings
 from app.database import init_db
-from app.api.routes import health, tracks, game, config
+from app.api.routes import health, tracks, game, config, users, bots
 
 settings = get_settings()
 
@@ -68,6 +68,8 @@ app.include_router(health.router, tags=["health"])
 app.include_router(config.router, tags=["config"])
 app.include_router(tracks.router, tags=["tracks"])
 app.include_router(game.router, tags=["game"])
+app.include_router(users.router, tags=["users"])
+app.include_router(bots.router, tags=["bots"])
 
 
 @app.get("/")

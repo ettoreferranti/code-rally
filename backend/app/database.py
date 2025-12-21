@@ -70,13 +70,13 @@ def get_db() -> Session:
 def init_db() -> None:
     """
     Initialise the database.
-    
+
     Creates all tables defined in the models if they don't exist.
     This is called on application startup.
     """
     # Import all models here so they are registered with Base
-    # This will be populated as we add models
-    # from app.models import user, car, bot, race
-    
+    from app.models.user import User
+    from app.models.bot import Bot
+
     Base.metadata.create_all(bind=engine)
     print(f"Database initialised at {DB_FILE}")
