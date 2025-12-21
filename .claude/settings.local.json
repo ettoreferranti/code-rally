@@ -43,7 +43,9 @@
       "Bash(npm test)",
       "Bash(git reset:*)",
       "Bash(gh issue comment:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(chmod:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []
