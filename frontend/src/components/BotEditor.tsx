@@ -6,7 +6,7 @@
  */
 
 import React, { useRef } from 'react';
-import Editor, { OnMount } from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 
 interface BotEditorProps {
@@ -72,7 +72,7 @@ export const BotEditor: React.FC<BotEditorProps> = ({
 }) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
-  const handleEditorDidMount: OnMount = (editor, monaco) => {
+  const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor | null, monaco: any) => {
     if (!editor || !monaco) return;
     editorRef.current = editor;
 
