@@ -982,6 +982,9 @@ class GameEngine:
                     'position': player.position,
                     'points': player.points,
                     'dnf': player.dnf,
+                    'is_bot': player.is_bot,
+                    'bot_name': player_id.split('-')[2] if player.is_bot and '-' in player_id else None,
+                    'bot_error': player.bot_error,
                 }
                 for player_id, player in self.state.players.items()
             }

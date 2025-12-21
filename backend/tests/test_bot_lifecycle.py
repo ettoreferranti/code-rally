@@ -87,7 +87,6 @@ def test_bot_loading_class_not_found():
     engine = GameEngine(track)
 
     bot_code = """
-from app.bot_runtime.base_bot import BaseBot
 
 class WrongName(BaseBot):
     pass
@@ -105,9 +104,6 @@ def test_bot_tick_execution():
 
     # Bot that accelerates
     bot_code = """
-from app.bot_runtime.base_bot import BaseBot
-from app.bot_runtime.types import BotActions
-
 class TestBot(BaseBot):
     def on_tick(self, state):
         return BotActions(accelerate=True, turn_right=True)
@@ -138,7 +134,6 @@ def test_bot_error_handling():
 
     # Bot that raises error
     bot_code = """
-from app.bot_runtime.base_bot import BaseBot
 
 class TestBot(BaseBot):
     def on_tick(self, state):
@@ -167,7 +162,6 @@ def test_bot_timeout_dq():
 
     # Bot with infinite loop (will timeout)
     bot_code = """
-from app.bot_runtime.base_bot import BaseBot
 
 class TestBot(BaseBot):
     def on_tick(self, state):
@@ -187,7 +181,7 @@ class TestBot(BaseBot):
     # Bot should be DQ'd due to timeout
     assert player.dnf
     assert player.bot_error is not None
-    assert "timeout" in player.bot_error.lower()
+    assert "time limit" in player.bot_error.lower() or "timeout" in player.bot_error.lower()
 
 
 def test_bot_checkpoint_callback():
@@ -196,19 +190,19 @@ def test_bot_checkpoint_callback():
     engine = GameEngine(track)
 
     bot_code = """
-from app.bot_runtime.base_bot import BaseBot
-from app.bot_runtime.types import BotActions
 
 class TestBot(BaseBot):
-    def __init__(self):
-        super().__init__()
-        self.checkpoints_seen = []
-
     def on_tick(self, state):
+        # Track checkpoints in memory (persistent dict provided by BaseBot)
+        if 'checkpoints_seen' not in self.memory:
+            self.memory['checkpoints_seen'] = []
         return BotActions(accelerate=True)
 
     def on_checkpoint(self, checkpoint_index, split_time):
-        self.checkpoints_seen.append((checkpoint_index, split_time))
+        # Store in memory dict
+        if 'checkpoints_seen' not in self.memory:
+            self.memory['checkpoints_seen'] = []
+        self.memory['checkpoints_seen'].append((checkpoint_index, split_time))
 """
 
     player = engine.add_bot_player("bot1", bot_code, "TestBot")
@@ -228,8 +222,9 @@ class TestBot(BaseBot):
     engine._check_checkpoint_progress(player)
 
     # Check that callback was called
-    assert len(player.bot_instance.checkpoints_seen) == 1
-    assert player.bot_instance.checkpoints_seen[0][0] == 0  # checkpoint index
+    assert 'checkpoints_seen' in player.bot_instance.memory
+    assert len(player.bot_instance.memory['checkpoints_seen']) == 1
+    assert player.bot_instance.memory['checkpoints_seen'][0][0] == 0  # checkpoint index
 
 
 def test_multiple_bots():

@@ -50,8 +50,10 @@ app = FastAPI(
 # In production, this should be even more restrictive
 origins = [
     "http://localhost:5173",  # Vite default port
+    "http://localhost:5174",  # Alternative Vite port
     "http://localhost:3000",  # Alternative React port
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
     "http://127.0.0.1:3000",
 ]
 

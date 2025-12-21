@@ -8,9 +8,12 @@ from typing import Dict, Set, Optional, Tuple
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from uuid import uuid4
 
-from app.core.engine import GameEngine, PlayerInput
+from app.core.engine import GameEngine, PlayerInput, RaceStatus
 from app.core.track import TrackGenerator
+from app.core.bot_manager import BotError
 from app.config import get_settings
+from app.database import SessionLocal
+from app.services import bot_service
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -258,6 +261,68 @@ async def game_websocket(
             elif message['type'] == 'start_race':
                 # Start race countdown
                 engine.start_race()
+
+            elif message['type'] == 'submit_bot':
+                # Submit a bot to the race
+                bot_id = message['data'].get('bot_id')
+
+                # Validate race status
+                if engine.state.race_info.status not in [RaceStatus.WAITING, RaceStatus.RACING]:
+                    await websocket.send_json({
+                        'type': 'bot_submission_response',
+                        'data': {'success': False, 'error': 'Invalid race status'}
+                    })
+                    continue
+
+                # Fetch bot from database
+                db = SessionLocal()
+                try:
+                    bot = bot_service.get_bot_by_id(db, bot_id)
+                    if not bot:
+                        await websocket.send_json({
+                            'type': 'bot_submission_response',
+                            'data': {'success': False, 'error': 'Bot not found'}
+                        })
+                        continue
+
+                    # Extract class name
+                    bot_class_name = bot_service.extract_class_name(bot.code)
+                    if not bot_class_name:
+                        await websocket.send_json({
+                            'type': 'bot_submission_response',
+                            'data': {'success': False, 'error': 'No bot class found'}
+                        })
+                        continue
+
+                    # Create unique bot player ID
+                    bot_player_id = f"bot-{bot.owner.username}-{bot.name}"
+
+                    # Check if already in race
+                    if bot_player_id in engine.state.players:
+                        await websocket.send_json({
+                            'type': 'bot_submission_response',
+                            'data': {'success': False, 'error': 'Bot already in race'}
+                        })
+                        continue
+
+                    # Add bot player
+                    try:
+                        engine.add_bot_player(bot_player_id, bot.code, bot_class_name)
+                        await websocket.send_json({
+                            'type': 'bot_submission_response',
+                            'data': {
+                                'success': True,
+                                'bot_player_id': bot_player_id,
+                                'bot_name': bot.name
+                            }
+                        })
+                    except BotError as e:
+                        await websocket.send_json({
+                            'type': 'bot_submission_response',
+                            'data': {'success': False, 'error': str(e)}
+                        })
+                finally:
+                    db.close()
 
     except WebSocketDisconnect:
         # Player disconnected

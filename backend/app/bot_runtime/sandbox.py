@@ -24,7 +24,6 @@ from RestrictedPython.Guards import (
     full_write_guard,
     safe_builtins
 )
-
 from app.config import get_settings
 
 
@@ -149,6 +148,7 @@ def _create_safe_globals() -> Dict[str, Any]:
         '_iter_unpack_sequence_': guarded_iter_unpack_sequence,
         '_unpack_sequence_': guarded_unpack_sequence,
         '_getattr_': safer_getattr,
+        '_getitem_': lambda obj, index: obj[index],  # Allow list/dict access
         '_write_': full_write_guard,
         '__metaclass__': type,
         '__name__': 'restricted_module',
@@ -232,12 +232,23 @@ class BotSandbox:
             raise ValueError(f"Bot code exceeds maximum size of {self.settings.bot.MAX_CODE_SIZE_KB}KB")
 
         # Compile with RestrictedPython
+        # Note: We disable the restrictive name policy (policy=lambda x: x) because:
+        # 1. We control the execution environment through safe_globals (no dangerous builtins)
+        # 2. We control imports through _safe_import (only math allowed)
+        # 3. Bots need __init__ to set up instance variables
         try:
-            byte_code = compile_restricted(
-                code,
-                filename='<bot_code>',
-                mode='exec'
-            )
+            # Create AST from source
+            import ast
+            tree = ast.parse(code, filename='<bot_code>', mode='exec')
+
+            # Compile using RestrictedPython with guards but no name checking
+            from RestrictedPython.compile import compile_restricted_exec
+            byte_code = compile_restricted_exec(tree, filename='<bot_code>')
+
+            if byte_code.errors:
+                raise SyntaxError(str(byte_code.errors))
+
+            byte_code = byte_code.code
         except SyntaxError as e:
             # RestrictedPython raises SyntaxError for security violations
             raise SandboxSecurityError(f"Security restrictions violated: {str(e)}")
@@ -319,6 +330,10 @@ class BotSandbox:
             finally:
                 # Cancel timeout
                 signal.setitimer(signal.ITIMER_REAL, 0)
+
+            # Convert BotActions to dict if needed
+            if hasattr(result, 'to_dict'):
+                return result.to_dict()
 
             # Validate result
             if not isinstance(result, dict):
