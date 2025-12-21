@@ -5,8 +5,8 @@
  * for the bot API (BaseBot, BotActions, etc.).
  */
 
-import React, { useRef, useEffect } from 'react';
-import Editor, { Monaco } from '@monaco-editor/react';
+import React, { useRef } from 'react';
+import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 
 interface BotEditorProps {
@@ -72,7 +72,8 @@ export const BotEditor: React.FC<BotEditorProps> = ({
 }) => {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
-  const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor, monaco: Monaco) => {
+  const handleEditorDidMount: OnMount = (editor, monaco) => {
+    if (!editor || !monaco) return;
     editorRef.current = editor;
 
     // Configure Python language features
