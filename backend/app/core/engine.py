@@ -72,6 +72,9 @@ class PlayerState:
     bot_class_name: Optional[str] = None  # Bot class name
     bot_error: Optional[str] = None  # Error message if bot failed
 
+    # Car properties
+    weight: float = 60.0  # Car weight (affects collision momentum transfer)
+
 
 @dataclass
 class GameState:
@@ -288,6 +291,9 @@ class GameEngine:
                     self._update_player_physics(player)
                     self._check_checkpoint_progress(player)
                     self._check_finish(player)
+
+            # Handle car-to-car collisions
+            self._handle_car_collisions()
 
             # Update race positions based on current progress
             self._update_race_positions()
@@ -619,6 +625,78 @@ class GameEngine:
 
                     # Push car out of wall
                     player.car.position = player.car.position + (normal * penetration)
+
+    def _handle_car_collisions(self) -> None:
+        """
+        Handle collisions between cars with elastic collision response.
+
+        Uses circle-based collision detection and applies momentum transfer
+        based on car weights.
+        """
+        car_radius = self.settings.physics.CAR_RADIUS
+        elasticity = self.settings.physics.COLLISION_ELASTICITY
+        min_speed = self.settings.physics.COLLISION_MIN_SPEED
+
+        # Check all pairs of cars
+        players = list(self.state.players.values())
+        for i in range(len(players)):
+            for j in range(i + 1, len(players)):
+                p1 = players[i]
+                p2 = players[j]
+
+                # Skip if either player is finished or DNF
+                if p1.is_finished or p2.is_finished or p1.dnf or p2.dnf:
+                    continue
+
+                # Calculate distance between cars
+                dx = p2.car.position.x - p1.car.position.x
+                dy = p2.car.position.y - p1.car.position.y
+                distance = (dx * dx + dy * dy) ** 0.5
+
+                collision_distance = 2 * car_radius
+
+                # Check if cars are colliding
+                if distance < collision_distance:
+                    # Calculate collision normal (from p1 to p2)
+                    if distance > 0.001:
+                        normal = Vector2(dx / distance, dy / distance)
+                    else:
+                        # Cars are exactly on top of each other, use arbitrary normal
+                        normal = Vector2(1, 0)
+
+                    # Calculate penetration depth
+                    penetration = collision_distance - distance
+
+                    # Calculate relative velocity along collision normal
+                    relative_velocity = p1.car.velocity - p2.car.velocity
+                    velocity_along_normal = relative_velocity.dot(normal)
+
+                    # Only apply collision if cars are moving toward each other
+                    # (velocity_along_normal > 0 means p1 is approaching p2 along the normal)
+                    # and the impact speed is above minimum threshold
+                    if velocity_along_normal > min_speed:
+                        # Calculate impulse magnitude using elastic collision formula
+                        # j = -(1 + e) * v_rel · n / (1/m1 + 1/m2)
+                        mass1 = p1.weight
+                        mass2 = p2.weight
+                        impulse_magnitude = (-(1 + elasticity) * velocity_along_normal) / (1/mass1 + 1/mass2)
+
+                        # Calculate impulse vector (impulse_magnitude is negative for approaching cars)
+                        impulse = normal * impulse_magnitude
+
+                        # Apply impulse to both cars
+                        # Standard elastic collision response: v1' = v1 + j*n/m1, v2' = v2 - j*n/m2
+                        p1.car.velocity = p1.car.velocity + (impulse * (1 / mass1))
+                        p2.car.velocity = p2.car.velocity - (impulse * (1 / mass2))
+
+                    # Separate cars to prevent overlap
+                    # Push each car apart proportional to their mass (lighter car moves more)
+                    total_mass = p1.weight + p2.weight
+                    p1_push = penetration * (p2.weight / total_mass)
+                    p2_push = penetration * (p1.weight / total_mass)
+
+                    p1.car.position = p1.car.position - (normal * p1_push)
+                    p2.car.position = p2.car.position + (normal * p2_push)
 
     def _check_checkpoint_progress(self, player: PlayerState) -> None:
         """
