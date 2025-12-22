@@ -56,9 +56,9 @@ class ConnectionManager:
         # Convert message to JSON once
         json_message = json.dumps(message)
 
-        # Send to all connected clients
+        # Send to all connected clients (copy set to avoid modification during iteration)
         disconnected = []
-        for connection in self.active_connections[session_id]:
+        for connection in list(self.active_connections[session_id]):
             try:
                 await connection.send_text(json_message)
             except Exception:
@@ -177,9 +177,6 @@ async def game_websocket(
     # Connect player
     await manager.connect(websocket, session_id, player_id)
 
-    # Add player to game
-    engine.add_player(player_id)
-
     # Start game loop if not already running
     if not engine._running:
         await engine.start_loop()
@@ -239,6 +236,9 @@ async def game_websocket(
                 }
             }
         })
+
+        # Add player to game AFTER successful connection message
+        engine.add_player(player_id)
 
         # Listen for player inputs
         while True:
@@ -324,10 +324,15 @@ async def game_websocket(
                 finally:
                     db.close()
 
-    except WebSocketDisconnect:
-        # Player disconnected
+    except (WebSocketDisconnect, Exception) as e:
+        # Player disconnected or connection error
         manager.disconnect(websocket, session_id)
-        engine.remove_player(player_id)
+
+        # Remove player from game engine
+        try:
+            engine.remove_player(player_id)
+        except Exception:
+            pass  # Player might not have been added yet
 
         # If no players left, stop the engine and clean up
         if not engine.state.players:

@@ -4,7 +4,8 @@
  * Provides CRUD operations for bots and user registration.
  */
 
-const API_BASE_URL = 'http://localhost:8000';
+// Use the current hostname to support both localhost and network access
+const API_BASE_URL = `http://${window.location.hostname}:8000`;
 
 // TypeScript interfaces matching backend models
 export interface User {

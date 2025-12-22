@@ -26,6 +26,7 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
   const [hasShownGo, setHasShownGo] = useState(false);
   const [showFinish, setShowFinish] = useState(false);
   const [hasShownFinish, setHasShownFinish] = useState(false);
+  const [previousRaceStatus, setPreviousRaceStatus] = useState<string>('');
 
   useEffect(() => {
     // Reset when race status changes to waiting or countdown (new race)
@@ -37,7 +38,27 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
       setDisplayText('');
       setIsAnimating(false);
     }
-  }, [raceStatus]);
+
+    // Detect transition from countdown to racing for "GO!" banner
+    if (previousRaceStatus === 'countdown' && raceStatus === 'racing' && !hasShownGo) {
+      setShowGo(true);
+      setHasShownGo(true);
+      setDisplayText('GO!');
+      setIsAnimating(true);
+
+      // Hide after 1 second
+      const timer = setTimeout(() => {
+        setShowGo(false);
+        setDisplayText('');
+        setIsAnimating(false);
+      }, 1000);
+
+      setPreviousRaceStatus(raceStatus);
+      return () => clearTimeout(timer);
+    }
+
+    setPreviousRaceStatus(raceStatus || '');
+  }, [raceStatus, previousRaceStatus, hasShownGo]);
 
   useEffect(() => {
     // Show FINISH banner when race ends
@@ -61,27 +82,12 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
   useEffect(() => {
     // Don't show anything if not during countdown
     if (!isVisible || raceStatus !== 'countdown') {
-      // Check if countdown just finished (transition from countdown to racing)
-      if (raceStatus === 'racing' && countdown !== undefined && countdown <= 0 && !hasShownGo) {
-        setShowGo(true);
-        setHasShownGo(true);
-        setDisplayText('GO!');
-        setIsAnimating(true);
-
-        // Hide after 1 second
-        const timer = setTimeout(() => {
-          setShowGo(false);
+      // If not showing GO or FINISH, clear display
+      if (!showGo && !showFinish) {
+        if (displayText && !['GO!', 'FINISH!'].includes(displayText)) {
           setDisplayText('');
           setIsAnimating(false);
-        }, 1000);
-
-        return () => clearTimeout(timer);
-      }
-
-      // If not showing GO, clear display
-      if (!showGo && !showFinish) {
-        setDisplayText('');
-        setIsAnimating(false);
+        }
       }
       return;
     }
@@ -92,7 +98,7 @@ export const CountdownOverlay: React.FC<CountdownOverlayProps> = ({
       setDisplayText(countdownNumber.toString());
       setIsAnimating(true);
     }
-  }, [countdown, isVisible, raceStatus, hasShownGo, showGo, showFinish]);
+  }, [countdown, isVisible, raceStatus, showGo, showFinish, displayText]);
 
   if (!displayText) {
     return null;

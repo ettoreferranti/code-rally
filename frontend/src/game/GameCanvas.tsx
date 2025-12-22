@@ -57,9 +57,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       clearCanvas(ctx, canvas);
 
       if (gameState) {
-        // Update camera to follow first car (player)
+        // Update camera to follow current player's car
         if (gameState.cars.length > 0) {
-          const playerCar = gameState.cars[0];
+          const playerCar = gameState.cars.find(car => car.isCurrentPlayer) || gameState.cars[0];
           camera.follow(playerCar.position.x, playerCar.position.y, 0.1);
         }
 
@@ -70,8 +70,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         renderTrack(ctx, gameState.track);
 
         // Render all cars
-        gameState.cars.forEach((car, index) => {
-          const color = index === 0 ? '#ff0000' : '#0000ff';
+        gameState.cars.forEach((car) => {
+          // Current player is red, other humans are blue, bots are yellow
+          let color = '#0000ff'; // Other players (blue)
+          if (car.isCurrentPlayer) {
+            color = '#ff0000'; // Current player (red)
+          } else if (car.isBot) {
+            color = '#ffff00'; // Bots (yellow)
+          }
           renderCar(ctx, car, color);
         });
       } else {

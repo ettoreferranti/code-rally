@@ -277,9 +277,21 @@ export function renderTrack(ctx: CanvasRenderingContext2D, track: Track): void {
 export function renderCar(
   ctx: CanvasRenderingContext2D,
   car: CarState,
-  color: string = '#ff0000'
+  color?: string
 ): void {
   ctx.save();
+
+  // Determine car color based on player type
+  let carColor = color;
+  if (!carColor) {
+    if (car.isCurrentPlayer) {
+      carColor = '#00ff00';  // Current player (green)
+    } else if (car.isBot) {
+      carColor = '#ff8800';  // Bot (orange)
+    } else {
+      carColor = '#0088ff';  // Other human (blue)
+    }
+  }
 
   // Translate to car position and rotate to heading
   ctx.translate(car.position.x, car.position.y);
@@ -290,7 +302,7 @@ export function renderCar(
   const height = 20;
 
   // Draw car body (rectangle along x-axis)
-  ctx.fillStyle = color;
+  ctx.fillStyle = carColor;
   ctx.fillRect(-width / 2, -height / 2, width, height);
 
   // Draw car outline
@@ -337,6 +349,18 @@ export function renderCar(
       ctx.arc(-width / 2 - 10 - i * 8, 0, 3 - i, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // Render bot name label if this is a bot
+  if (car.botName) {
+    // Reset rotation for label (we want text to be upright)
+    ctx.rotate(-car.heading);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(car.botName, 0, -20);
   }
 
   ctx.restore();

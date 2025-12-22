@@ -71,6 +71,10 @@ export interface CarState {
   nitro_charges: number;  // Number of nitro boosts remaining
   nitro_active: boolean;  // Whether nitro is currently active
   nitro_remaining_ticks: number;  // Ticks remaining for current nitro boost
+  isCurrentPlayer?: boolean;  // Whether this is the current player's car
+  playerId?: string;  // Player/bot ID
+  isBot?: boolean;  // Whether this is a bot-controlled car
+  botName?: string | null;  // Bot name if this is a bot
 }
 
 export interface RaceInfo {

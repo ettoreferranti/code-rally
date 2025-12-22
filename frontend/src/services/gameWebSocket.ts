@@ -4,7 +4,8 @@
 
 import type { Track, InputState } from '../game/types';
 
-const WS_BASE_URL = 'ws://localhost:8000';
+// Use the current hostname to support both localhost and network access
+const WS_BASE_URL = `ws://${window.location.hostname}:8000`;
 
 export interface GameStateMessage {
   type: 'game_state';
@@ -39,6 +40,9 @@ export interface GameStateMessage {
         position: number | null;  // Final race position (1st, 2nd, etc.)
         points: number;  // Points awarded
         dnf: boolean;  // Did Not Finish
+        is_bot: boolean;  // Whether this player is a bot
+        bot_name: string | null;  // Bot name if is_bot is true
+        bot_error: string | null;  // Bot error message if any
       };
     };
   };
@@ -53,11 +57,22 @@ export interface ConnectedMessage {
   };
 }
 
-export type ServerMessage = GameStateMessage | ConnectedMessage;
+export interface BotSubmissionResponseMessage {
+  type: 'bot_submission_response';
+  data: {
+    success: boolean;
+    bot_player_id?: string;
+    bot_name?: string;
+    error?: string;
+  };
+}
+
+export type ServerMessage = GameStateMessage | ConnectedMessage | BotSubmissionResponseMessage;
 
 export interface GameWebSocketCallbacks {
   onConnected?: (sessionId: string, playerId: string, track: Track) => void;
   onGameState?: (state: GameStateMessage['data']) => void;
+  onBotSubmissionResponse?: (response: BotSubmissionResponseMessage['data']) => void;
   onDisconnected?: () => void;
   onError?: (error: Event) => void;
 }
@@ -173,6 +188,20 @@ export class GameWebSocketClient {
   }
 
   /**
+   * Submit a bot to the race.
+   */
+  sendBot(botId: number): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    this.ws.send(JSON.stringify({
+      type: 'submit_bot',
+      data: { bot_id: botId },
+    }));
+  }
+
+  /**
    * Handle incoming message from server.
    */
   private handleMessage(message: ServerMessage): void {
@@ -190,6 +219,10 @@ export class GameWebSocketClient {
 
       case 'game_state':
         this.callbacks.onGameState?.(message.data);
+        break;
+
+      case 'bot_submission_response':
+        this.callbacks.onBotSubmissionResponse?.(message.data);
         break;
 
       default:

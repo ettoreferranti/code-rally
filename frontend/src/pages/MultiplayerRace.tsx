@@ -5,6 +5,8 @@ import { RaceHUD } from '../components/RaceHUD';
 import { CountdownOverlay } from '../components/CountdownOverlay';
 import { RaceResultsScreen } from '../components/RaceResultsScreen';
 import { GameWebSocketClient, type GameStateMessage } from '../services';
+import { getUserBots, type BotListItem } from '../services/botApi';
+import { useUsername } from '../hooks/useUsername';
 
 export default function MultiplayerRace() {
   const [track, setTrack] = useState<Track | null>(null);
@@ -17,11 +19,23 @@ export default function MultiplayerRace() {
   const [raceResults, setRaceResults] = useState<PlayerResult[] | null>(null);
   const [showResults, setShowResults] = useState(false);
 
-  // Parse seed from URL or generate random (memoized to only calculate once)
+  // Bot submission state
+  const { username } = useUsername();
+  const [userBots, setUserBots] = useState<BotListItem[]>([]);
+  const [selectedBotId, setSelectedBotId] = useState<number | null>(null);
+  const [botSubmissionStatus, setBotSubmissionStatus] = useState<string | null>(null);
+  const [submittedBots, setSubmittedBots] = useState<Set<string>>(new Set());
+
+  // Parse seed and session_id from URL (memoized to only calculate once)
   const seed = useMemo(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const seedParam = urlParams.get('seed');
     return seedParam ? parseInt(seedParam, 10) : Math.floor(Math.random() * 1000000);
+  }, []);
+
+  const sessionIdFromUrl = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('session_id') || undefined;
   }, []);
 
   const inputState = useKeyboardInput();
@@ -45,6 +59,18 @@ export default function MultiplayerRace() {
       console.log('Game state updated! Tick:', gameState.tick, 'Status:', gameState.raceInfo);
     }
   }, [gameState]);
+
+  // Load user's bots
+  useEffect(() => {
+    if (!username) return;
+
+    getUserBots(username)
+      .then((bots) => {
+        setUserBots(bots);
+        if (bots.length > 0) setSelectedBotId(bots[0].id);
+      })
+      .catch((err) => console.error('Failed to load bots:', err));
+  }, [username]);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -86,19 +112,23 @@ export default function MultiplayerRace() {
 
         const newGameState: GameState = {
           track: currentTrack,
-          cars: [{
-            position: playerData.car.position,
-            velocity: playerData.car.velocity,
-            heading: playerData.car.heading,
-            angular_velocity: playerData.car.angular_velocity,
-            is_drifting: playerData.car.is_drifting,
-            drift_angle: playerData.car.drift_angle,
+          cars: Object.entries(state.players).map(([pid, pData]) => ({
+            position: pData.car.position,
+            velocity: pData.car.velocity,
+            heading: pData.car.heading,
+            angular_velocity: pData.car.angular_velocity,
+            is_drifting: pData.car.is_drifting,
+            drift_angle: pData.car.drift_angle,
             throttle: 0,  // Not tracked server-side yet
-            is_off_track: playerData.is_off_track,
-            nitro_charges: playerData.car.nitro_charges,
-            nitro_active: playerData.car.nitro_active,
-            nitro_remaining_ticks: playerData.car.nitro_remaining_ticks,
-          }],
+            is_off_track: pData.is_off_track,
+            nitro_charges: pData.car.nitro_charges,
+            nitro_active: pData.car.nitro_active,
+            nitro_remaining_ticks: pData.car.nitro_remaining_ticks,
+            isCurrentPlayer: pid === currentPlayerId,
+            playerId: pid,
+            isBot: pData.is_bot,
+            botName: pData.bot_name,
+          })),
           tick: state.tick,
           raceInfo: {
             currentCheckpoint: playerData.current_checkpoint,
@@ -141,6 +171,17 @@ export default function MultiplayerRace() {
         }
       },
 
+      onBotSubmissionResponse: (response) => {
+        if (response.success) {
+          setBotSubmissionStatus(`✓ Bot "${response.bot_name}" submitted!`);
+          setSubmittedBots(prev => new Set(prev).add(response.bot_player_id!));
+          setTimeout(() => setBotSubmissionStatus(null), 3000);
+        } else {
+          setBotSubmissionStatus(`✗ Error: ${response.error}`);
+          setTimeout(() => setBotSubmissionStatus(null), 5000);
+        }
+      },
+
       onDisconnected: () => {
         console.log('Disconnected from game session');
         setError('Disconnected from server');
@@ -153,7 +194,7 @@ export default function MultiplayerRace() {
     });
 
     wsRef.current = ws;
-    ws.connect(undefined, 'medium', seed);  // Connect with random or URL-specified seed
+    ws.connect(sessionIdFromUrl, 'medium', seed);  // Connect with session from URL or create new
 
     // Cleanup on unmount
     return () => {
@@ -204,11 +245,18 @@ export default function MultiplayerRace() {
       // Reset flags for new race
       hasShownResultsRef.current = false;
       hasClosedResultsRef.current = false;
+      setSubmittedBots(new Set());
       wsRef.current.startRace();
       setRaceStarted(true);
     } else {
       console.log('WebSocket not connected!');
     }
+  };
+
+  const handleSubmitBot = () => {
+    if (!selectedBotId || !wsRef.current?.isConnected()) return;
+    wsRef.current.sendBot(selectedBotId);
+    setBotSubmissionStatus('Submitting bot...');
   };
 
   const handleCloseResults = () => {
@@ -217,6 +265,26 @@ export default function MultiplayerRace() {
     setRaceResults(null);
     setRaceStarted(false);
     hasClosedResultsRef.current = true;  // Prevent results from reopening until race restarts
+  };
+
+  const handleShareSession = () => {
+    if (!sessionId) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('session_id', sessionId);
+    url.searchParams.set('seed', seed.toString());
+
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      if (isLocalhost) {
+        alert(`⚠️ Link copied! Note: You're using localhost.\n\nFor network access, replace 'localhost' with your IP address (e.g., 172.16.1.133) in the link:\n\n${url.toString()}`);
+      } else {
+        alert('✅ Session link copied to clipboard! Share it with others to race together.');
+      }
+    }).catch(() => {
+      alert(`Share this link: ${url.toString()}`);
+    });
   };
 
   if (loading) {
@@ -253,9 +321,15 @@ export default function MultiplayerRace() {
       <div className="mb-4 flex gap-4 items-center flex-wrap">
         <div className="text-gray-300">
           <span className="font-semibold">Session:</span> {sessionId?.substring(0, 8)}...
+          {sessionIdFromUrl && (
+            <span className="ml-2 px-2 py-1 text-xs bg-blue-600 rounded">Joined</span>
+          )}
         </div>
         <div className="text-gray-300">
           <span className="font-semibold">Player ID:</span> {playerId?.substring(0, 8)}...
+        </div>
+        <div className="text-gray-300">
+          <span className="font-semibold">Players:</span> {gameState?.raceInfo.totalPlayers || 1}
         </div>
         <div className="text-gray-300">
           <span className="font-semibold">Track Seed:</span> {seed}
@@ -267,6 +341,13 @@ export default function MultiplayerRace() {
             📋 Copy
           </button>
         </div>
+        <button
+          onClick={handleShareSession}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          title="Copy shareable session link to clipboard"
+        >
+          👥 Share Session
+        </button>
         {!raceStarted && (
           <button
             onClick={handleStartRace}
@@ -274,6 +355,37 @@ export default function MultiplayerRace() {
           >
             Start Race
           </button>
+        )}
+        {userBots.length > 0 && (
+          <div className="flex gap-2 items-center">
+            <select
+              value={selectedBotId || ''}
+              onChange={(e) => setSelectedBotId(Number(e.target.value))}
+              className="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600"
+            >
+              {userBots.map((bot) => (
+                <option key={bot.id} value={bot.id}>{bot.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleSubmitBot}
+              disabled={!selectedBotId || gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'finished'}
+              className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+            >
+              Submit Bot
+            </button>
+          </div>
+        )}
+        {botSubmissionStatus && (
+          <div className={`px-4 py-2 rounded ${
+            botSubmissionStatus.startsWith('✓')
+              ? 'bg-green-600/20 text-green-400 border border-green-600'
+              : botSubmissionStatus.startsWith('✗')
+              ? 'bg-red-600/20 text-red-400 border border-red-600'
+              : 'bg-blue-600/20 text-blue-400 border border-blue-600'
+          }`}>
+            {botSubmissionStatus}
+          </div>
         )}
         <button
           onClick={() => window.location.reload()}
@@ -285,7 +397,7 @@ export default function MultiplayerRace() {
       </div>
 
       <p className="text-gray-300 mb-4">
-        Physics running on server at 60Hz. Each reload generates a new random track! Share the seed with friends to race on the same track.
+        Physics running on server at 60Hz. Click "👥 Share Session" to race with friends in real-time! Multiple humans, bots, or both can race together.
       </p>
 
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
@@ -360,7 +472,8 @@ export default function MultiplayerRace() {
           <li>Server broadcasts state updates at 60 FPS</li>
           <li>Obstacle collision handled server-side</li>
           <li>Checkpoint progress tracked server-side</li>
-          <li>Multi-player support (connect with same session ID)</li>
+          <li><strong>Real-time multiplayer!</strong> Click "👥 Share Session" to race with friends</li>
+          <li>Human vs human, bot vs bot, or mixed races supported</li>
           <li>Random track generation - each reload creates a new track!</li>
           <li>Reproducible tracks - use <code>?seed=123</code> in URL to load a specific track</li>
         </ul>
