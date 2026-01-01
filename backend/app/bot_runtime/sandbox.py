@@ -118,6 +118,10 @@ def _create_safe_globals() -> Dict[str, Any]:
     # Add custom restricted import
     restricted_builtins['__import__'] = _safe_import
 
+    # Add RestrictedPython iteration guard
+    # This is required for for-loops and tuple unpacking to work
+    restricted_builtins['_getiter_'] = iter
+
     # Block dangerous functions by setting to None
     restricted_builtins.update({
         'eval': None,
@@ -254,8 +258,10 @@ class BotSandbox:
             raise SandboxSecurityError(f"Security restrictions violated: {str(e)}")
 
         # Create safe execution environment
+        # IMPORTANT: Use same dict for globals and locals so that imports
+        # (like 'import math') are available in the global namespace that
+        # bot class methods will use. This fixes the scoping issue.
         safe_dict = _create_safe_globals()
-        local_dict = {}
 
         # Execute code to define bot class
         try:
@@ -267,7 +273,9 @@ class BotSandbox:
             signal.setitimer(signal.ITIMER_REAL, self.timeout_seconds)
 
             try:
-                exec(byte_code, safe_dict, local_dict)
+                # Use safe_dict for both globals and locals
+                # This ensures imports become part of the global namespace
+                exec(byte_code, safe_dict, safe_dict)
             finally:
                 # Cancel timeout
                 signal.setitimer(signal.ITIMER_REAL, 0)
@@ -279,11 +287,11 @@ class BotSandbox:
         except Exception as e:
             raise SandboxSecurityError(f"Bot code execution failed: {str(e)}")
 
-        # Get bot class from local namespace
-        if class_name not in local_dict:
+        # Get bot class from namespace (now in safe_dict)
+        if class_name not in safe_dict:
             raise ValueError(f"Bot class '{class_name}' not found in code")
 
-        bot_class = local_dict[class_name]
+        bot_class = safe_dict[class_name]
 
         # Instantiate bot (with timeout)
         try:

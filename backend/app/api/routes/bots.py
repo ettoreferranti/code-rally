@@ -12,6 +12,7 @@ from datetime import datetime
 
 from app.database import get_db
 from app.services import bot_service, user_service
+from app.bot_runtime.templates import get_template_list, get_template_code
 
 
 router = APIRouter(prefix="/bots", tags=["bots"])
@@ -210,3 +211,75 @@ async def delete_bot(
         raise HTTPException(status_code=404, detail="Bot not found")
 
     return None
+
+
+# ====================================================================
+# Template Endpoints
+# ====================================================================
+
+
+class TemplateInfo(BaseModel):
+    """Template metadata."""
+    id: str
+    name: str
+    difficulty: int
+    description: str
+    features: List[str]
+
+
+class TemplateCodeResponse(BaseModel):
+    """Template code response."""
+    id: str
+    name: str
+    code: str
+
+
+@router.get("/templates", response_model=List[TemplateInfo])
+async def list_templates():
+    """
+    Get list of available bot templates.
+
+    Returns:
+        List of template metadata (without code for performance)
+    """
+    templates = get_template_list()
+    return [
+        TemplateInfo(
+            id=t["id"],
+            name=t["name"],
+            difficulty=t["difficulty"],
+            description=t["description"],
+            features=t["features"]
+        )
+        for t in templates
+    ]
+
+
+@router.get("/templates/{template_id}", response_model=TemplateCodeResponse)
+async def get_template(template_id: str):
+    """
+    Get source code for a specific template.
+
+    Args:
+        template_id: Template identifier (e.g., "simple_follower")
+
+    Returns:
+        Template code and metadata
+
+    Raises:
+        404: Template not found
+    """
+    try:
+        code = get_template_code(template_id)
+
+        # Get template metadata
+        templates = get_template_list()
+        template = next((t for t in templates if t["id"] == template_id), None)
+
+        return TemplateCodeResponse(
+            id=template_id,
+            name=template["name"] if template else template_id,
+            code=code
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
