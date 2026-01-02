@@ -42,6 +42,20 @@ export interface UpdateBotRequest {
   code?: string;
 }
 
+export interface TemplateInfo {
+  id: string;
+  name: string;
+  difficulty: number;
+  description: string;
+  features: string[];
+}
+
+export interface TemplateCodeResponse {
+  id: string;
+  name: string;
+  code: string;
+}
+
 /**
  * Get all users.
  *
@@ -214,4 +228,37 @@ export async function deleteBot(botId: number): Promise<void> {
     const error = await response.json();
     throw new Error(error.detail || `Failed to delete bot: ${response.statusText}`);
   }
+}
+
+/**
+ * Get list of available bot templates.
+ *
+ * @returns Array of template metadata (without code)
+ */
+export async function getTemplates(): Promise<TemplateInfo[]> {
+  const response = await fetch(`${API_BASE_URL}/bots/templates`);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || `Failed to get templates: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Get source code for a specific template.
+ *
+ * @param templateId - Template identifier (e.g., "simple_follower")
+ * @returns Template code and metadata
+ */
+export async function getTemplate(templateId: string): Promise<TemplateCodeResponse> {
+  const response = await fetch(`${API_BASE_URL}/bots/templates/${templateId}`);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || `Failed to get template: ${response.statusText}`);
+  }
+
+  return response.json();
 }

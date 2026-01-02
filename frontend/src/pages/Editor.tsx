@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BotEditor, DEFAULT_BOT_CODE } from '../components/BotEditor';
 import { useUsername } from '../hooks/useUsername';
-import { getAllUsers, registerUser, deleteUser, getUserBots, getBot, createBot, updateBot, deleteBot, type User, type Bot, type BotListItem } from '../services/botApi';
+import { getAllUsers, registerUser, deleteUser, getUserBots, getBot, createBot, updateBot, deleteBot, getTemplates, getTemplate, type User, type Bot, type BotListItem, type TemplateInfo } from '../services/botApi';
 import { migrateLocalStorageToDatabase } from '../utils/migrateLocalStorage';
 
 export default function Editor() {
@@ -17,6 +17,8 @@ export default function Editor() {
   const [showUserModal, setShowUserModal] = useState<boolean>(false);
   const [availableUsers, setAvailableUsers] = useState<User[]>([]);
   const [newUsername, setNewUsername] = useState<string>('');
+  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
 
   // Show user selection modal on first visit or if no username
   useEffect(() => {
@@ -33,6 +35,21 @@ export default function Editor() {
     } catch (err) {
       console.error('Failed to load users:', err);
       setAvailableUsers([]);
+    }
+  };
+
+  // Load templates on mount
+  useEffect(() => {
+    loadTemplates();
+  }, []);
+
+  const loadTemplates = async () => {
+    try {
+      const templateList = await getTemplates();
+      setTemplates(templateList);
+    } catch (err) {
+      console.error('Failed to load templates:', err);
+      setTemplates([]);
     }
   };
 
@@ -194,6 +211,38 @@ export default function Editor() {
     reader.readAsText(file);
   };
 
+  const handleLoadTemplate = async () => {
+    if (!selectedTemplate) {
+      setError('Please select a template first');
+      return;
+    }
+
+    const template = templates.find(t => t.id === selectedTemplate);
+    if (!template) return;
+
+    // Confirm before overwriting current code
+    const confirmMsg = `Load "${template.name}" template? This will replace your current code.`;
+    if (!confirm(confirmMsg)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const templateData = await getTemplate(selectedTemplate);
+      setCode(templateData.code);
+      setBotName(template.name);
+
+      // Clear current bot (we're starting fresh with a template)
+      setCurrentBot(null);
+      setSaved(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load template');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSelectExistingUser = async (selectedUsername: string) => {
     try {
       setLoading(true);
@@ -337,6 +386,59 @@ export default function Editor() {
           )}
         </div>
       )}
+
+      {/* Template Selection Section */}
+      <div className="mb-6 p-4 bg-gradient-to-r from-purple-900/30 to-blue-900/30 rounded-lg border border-purple-700/50">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-lg">📚</span>
+          <label className="text-sm font-semibold text-purple-200">Start from a Template</label>
+        </div>
+
+        <p className="text-sm text-gray-300 mb-3">
+          Load a pre-built bot template to learn different racing strategies. Great for beginners!
+        </p>
+
+        <div className="flex gap-3 flex-wrap items-start">
+          <div className="flex-1 min-w-[200px]">
+            <select
+              value={selectedTemplate}
+              onChange={(e) => setSelectedTemplate(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loading}
+            >
+              <option value="">-- Select a template --</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {'★'.repeat(template.difficulty)}{'☆'.repeat(5 - template.difficulty)} {template.name}
+                </option>
+              ))}
+            </select>
+
+            {selectedTemplate && templates.find(t => t.id === selectedTemplate) && (
+              <div className="mt-2 p-3 bg-gray-800/50 rounded border border-gray-700">
+                <p className="text-sm text-gray-300 mb-2">
+                  {templates.find(t => t.id === selectedTemplate)?.description}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {templates.find(t => t.id === selectedTemplate)?.features.map((feature, idx) => (
+                    <span key={idx} className="text-xs px-2 py-1 bg-purple-600/30 text-purple-200 rounded">
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleLoadTemplate}
+            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={loading || !selectedTemplate}
+          >
+            📥 Load Template
+          </button>
+        </div>
+      </div>
 
       {/* Bot Name Input */}
       <div className="mb-4">
