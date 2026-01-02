@@ -1,10 +1,11 @@
 """
 Surface Aware Racer - Template for Intermediate Users
 
-This bot adapts its driving style based on the surface type.
+This bot navigates toward checkpoints while adapting driving style based on surface type.
 Rally stages have different surfaces with varying grip levels.
 
 Learning Goals:
+- Checkpoint navigation with math
 - Reading surface type data
 - Adapting speed to conditions
 - Using dictionaries for configuration
@@ -13,16 +14,18 @@ Learning Goals:
 Difficulty: ★★☆☆☆ (Intermediate)
 """
 
+import math
+
 
 class SurfaceAwareRacer(GuardedBotBase):
     """
-    An intermediate bot that adjusts driving style based on surface conditions.
+    An intermediate bot that navigates to checkpoints while adapting to surface conditions.
 
     Strategy:
-    1. Maintain different maximum speeds for each surface type
-    2. Brake when exceeding safe speed for current surface
-    3. Use nitro strategically on asphalt (best grip)
-    4. Steer based on raycast sensors
+    1. Navigate toward checkpoints using angle calculations
+    2. Maintain different maximum speeds for each surface type
+    3. Brake when exceeding safe speed or making sharp turns
+    4. Use nitro strategically on good surfaces
     """
 
     def __init__(self):
@@ -40,6 +43,9 @@ class SurfaceAwareRacer(GuardedBotBase):
 
         # Nitro strategy: Only use on surfaces with good grip
         self.nitro_surfaces = {"asphalt", "wet"}
+
+        # Steering configuration
+        self.steering_threshold = 0.1
 
 
     def on_tick(self, state):
@@ -80,39 +86,50 @@ class SurfaceAwareRacer(GuardedBotBase):
 
 
         # ============================================================
-        # STEP 3: Calculate Steering
+        # STEP 3: Calculate Steering (navigate to checkpoint)
         # ============================================================
 
-        # Use raycasts to determine steering direction
-        steering = self.calculate_steering(state)
+        # Get next checkpoint
+        checkpoints = state.track.checkpoints
+        next_cp_idx = state.track.next_checkpoint
 
-        # steering is a number:
-        # - Negative value = turn left
-        # - Positive value = turn right
-        # - Close to zero = go straight
+        # Check if finished
+        if next_cp_idx >= len(checkpoints):
+            return BotActions(accelerate=True, brake=False)
+
+        # Calculate angle to checkpoint
+        target = checkpoints[next_cp_idx]
+        my_x = state.car.position[0]
+        my_y = state.car.position[1]
+        dx = target[0] - my_x
+        dy = target[1] - my_y
+
+        target_angle = math.atan2(dy, dx)
+        angle_diff = target_angle - state.car.heading
+
+        # Normalize angle
+        while angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        while angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
 
 
         # ============================================================
         # STEP 4: Make Speed Decisions
         # ============================================================
 
-        # BRAKING: Brake if going too fast for current surface
-        should_brake = going_too_fast
+        # BRAKING: Brake if going too fast OR sharp turn needed
+        should_brake = going_too_fast or abs(angle_diff) > 0.7
 
-        # ACCELERATION: Accelerate if below safe speed
-        should_accelerate = not going_too_fast
+        # ACCELERATION: Accelerate if not braking
+        should_accelerate = not should_brake
 
-        # NITRO: Use on good surfaces when not going too fast
-        # Only activate if:
-        # 1. We have nitro charges
-        # 2. Current surface is good for nitro
-        # 3. We're not already going too fast
-        # 4. We're going reasonably straight (small steering angle)
+        # NITRO: Use on good surfaces when going straight
         should_use_nitro = (
             has_nitro
             and current_surface in self.nitro_surfaces
             and not going_too_fast
-            and abs(steering) < 0.3  # Not turning sharply
+            and abs(angle_diff) < 0.3  # Not turning sharply
         )
 
 
@@ -120,44 +137,17 @@ class SurfaceAwareRacer(GuardedBotBase):
         # STEP 5: Return Actions
         # ============================================================
 
+        # Steer toward checkpoint
+        should_turn_left = angle_diff > self.steering_threshold
+        should_turn_right = angle_diff < -self.steering_threshold
+
         return BotActions(
             accelerate=should_accelerate,
             brake=should_brake,
-            turn_left=steering < -0.1,   # Turn left if steering is negative
-            turn_right=steering > 0.1,    # Turn right if steering is positive
+            turn_left=should_turn_left,
+            turn_right=should_turn_right,
             use_nitro=should_use_nitro
         )
-
-
-    def calculate_steering(self, state):
-        """
-        Helper method to calculate steering direction using raycasts.
-
-        Args:
-            state: Game state with raycast data
-
-        Returns:
-            float: Steering value (negative = left, positive = right)
-        """
-        # Get relevant raycasts
-        # rays[0] = straight ahead
-        # rays[2] = 45 degrees left
-        # rays[4] = 45 degrees right
-
-        left_distance = state.rays[2].distance
-        right_distance = state.rays[4].distance
-
-        # Calculate steering based on clearance difference
-        # If left has more clearance, return negative (turn left)
-        # If right has more clearance, return positive (turn right)
-        #
-        # Divide by 100 to normalize the value to a reasonable range
-        steering = (right_distance - left_distance) / 100.0
-
-        # Clamp steering to reasonable range (-1.0 to 1.0)
-        steering = max(-1.0, min(1.0, steering))
-
-        return steering
 
 
     # ================================================================

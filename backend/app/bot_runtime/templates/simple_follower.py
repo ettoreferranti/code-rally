@@ -1,31 +1,35 @@
 """
 Simple Follower Bot - Template for Beginners
 
-This bot uses raycasts (vision sensors) to follow the track.
-It's the simplest racing strategy: avoid obstacles and stay on track.
+This bot combines raycasts for obstacle avoidance with basic checkpoint navigation.
+It steers toward checkpoints while avoiding walls and obstacles.
 
 Learning Goals:
 - Understanding raycasts (vision sensors)
-- Basic steering logic
-- Speed control based on obstacles ahead
+- Basic checkpoint navigation
+- Combining multiple sensors for decisions
 
 Difficulty: ★☆☆☆☆ (Beginner)
 """
 
+import math
+
 
 class SimpleFollower(GuardedBotBase):
     """
-    A beginner-friendly bot that uses raycasts to navigate the track.
+    A beginner-friendly bot that combines checkpoint navigation with obstacle avoidance.
 
     Strategy:
-    1. Accelerate when the path ahead is clear
-    2. Brake when approaching obstacles
-    3. Steer away from track boundaries
+    1. Calculate direction to next checkpoint
+    2. Steer toward checkpoint
+    3. Avoid obstacles using raycasts
+    4. Brake when approaching turns or obstacles
     """
 
     def __init__(self):
         """Initialize the bot. Called once when the bot is loaded."""
         self.name = "Simple Follower"
+        self.steering_threshold = 0.1  # Don't turn for tiny angle differences
 
     def on_tick(self, state):
         """
@@ -69,39 +73,77 @@ class SimpleFollower(GuardedBotBase):
 
 
         # ============================================================
-        # STEP 2: Make Decisions Based on Sensors
+        # STEP 2: Calculate Direction to Checkpoint
         # ============================================================
 
-        # Check if there's clearance ahead
-        # If the front ray shows >30 units, the path is clear
-        front_clear = front_ray.distance > 30
+        # Get next checkpoint position
+        checkpoints = state.track.checkpoints
+        next_cp_idx = state.track.next_checkpoint
 
-        # Check if left side has clearance
-        left_clear = left_ray.distance > 50
+        # Check if we've finished (no more checkpoints)
+        if next_cp_idx >= len(checkpoints):
+            # Keep going straight
+            return BotActions(accelerate=True, brake=False)
 
-        # Check if right side has clearance
-        right_clear = right_ray.distance > 50
+        # Get target checkpoint
+        target = checkpoints[next_cp_idx]
+
+        # Calculate angle to target
+        my_x = state.car.position[0]
+        my_y = state.car.position[1]
+        target_x = target[0]
+        target_y = target[1]
+
+        dx = target_x - my_x
+        dy = target_y - my_y
+
+        # Use atan2 to get angle (in radians) to checkpoint
+        target_angle = math.atan2(dy, dx)
+
+        # Calculate how much we need to turn
+        angle_diff = target_angle - state.car.heading
+
+        # Normalize angle to [-π, +π]
+        while angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        while angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
 
 
         # ============================================================
-        # STEP 3: Decide Actions
+        # STEP 3: Decide Steering (toward checkpoint, avoid obstacles)
         # ============================================================
 
-        # ACCELERATION: Accelerate when path ahead is clear
-        should_accelerate = front_clear
+        # Default: steer toward checkpoint
+        should_turn_left = angle_diff > self.steering_threshold
+        should_turn_right = angle_diff < -self.steering_threshold
 
-        # BRAKING: Brake when getting too close to obstacles
-        should_brake = not front_clear
-
-        # STEERING: Turn away from obstacles
-        # If left side is blocked but right is clear, turn right
-        # If right side is blocked but left is clear, turn left
-        should_turn_left = (not left_clear) and right_clear
-        should_turn_right = (not right_clear) and left_clear
+        # Override if obstacle is very close (emergency avoidance)
+        if front_ray.distance < 30:
+            # Obstacle ahead! Turn away from it
+            if left_ray.distance > right_ray.distance:
+                # More space on left
+                should_turn_left = True
+                should_turn_right = False
+            else:
+                # More space on right
+                should_turn_left = False
+                should_turn_right = True
 
 
         # ============================================================
-        # STEP 4: Return Actions
+        # STEP 4: Decide Speed
+        # ============================================================
+
+        # Brake if obstacle very close OR making sharp turn
+        should_brake = front_ray.distance < 30 or abs(angle_diff) > 0.8
+
+        # Accelerate if not braking
+        should_accelerate = not should_brake
+
+
+        # ============================================================
+        # STEP 5: Return Actions
         # ============================================================
 
         # Return a BotActions object (or dictionary) with your decisions
