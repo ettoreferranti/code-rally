@@ -4,6 +4,8 @@ WebSocket API for real-time game state and multiplayer racing.
 
 import asyncio
 import json
+import time
+import logging
 from typing import Dict, Set, Optional, Tuple
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from uuid import uuid4
@@ -14,6 +16,8 @@ from app.core.bot_manager import BotError
 from app.config import get_settings
 from app.database import SessionLocal
 from app.services import bot_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -29,6 +33,8 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: Dict[str, Set[WebSocket]] = {}
+        # Track connection metadata (last pong time, player info)
+        self.connection_metadata: Dict[WebSocket, dict] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str, player_id: str) -> None:
         """Accept a new WebSocket connection."""
@@ -39,6 +45,13 @@ class ConnectionManager:
 
         self.active_connections[session_id].add(websocket)
 
+        # Initialize connection metadata
+        self.connection_metadata[websocket] = {
+            'last_pong_time': time.time(),
+            'player_id': player_id,
+            'session_id': session_id
+        }
+
     def disconnect(self, websocket: WebSocket, session_id: str) -> None:
         """Remove a WebSocket connection."""
         if session_id in self.active_connections:
@@ -47,6 +60,21 @@ class ConnectionManager:
             # Clean up empty sessions
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
+
+        # Clean up metadata
+        if websocket in self.connection_metadata:
+            del self.connection_metadata[websocket]
+
+    def update_pong_time(self, websocket: WebSocket) -> None:
+        """Update last pong time for a connection."""
+        if websocket in self.connection_metadata:
+            self.connection_metadata[websocket]['last_pong_time'] = time.time()
+
+    def get_last_pong_time(self, websocket: WebSocket) -> float:
+        """Get last pong time for a connection."""
+        if websocket in self.connection_metadata:
+            return self.connection_metadata[websocket]['last_pong_time']
+        return 0.0
 
     async def broadcast(self, message: dict, session_id: str) -> None:
         """Broadcast a message to all connections in a session."""
@@ -134,6 +162,64 @@ async def state_broadcaster(session_id: str, update_rate: int = 60) -> None:
         await asyncio.sleep(interval)
 
 
+async def heartbeat_monitor(
+    websocket: WebSocket,
+    session_id: str,
+    player_id: str,
+    ping_interval: float = 30.0,
+    pong_timeout: float = 5.0
+) -> None:
+    """
+    Monitor connection health with ping/pong heartbeat.
+
+    Sends ping messages at regular intervals and expects pong responses.
+    Closes the connection if pong is not received within the timeout period.
+
+    Args:
+        websocket: WebSocket connection to monitor
+        session_id: Game session ID
+        player_id: Player identifier
+        ping_interval: Seconds between pings (default: 30.0)
+        pong_timeout: Seconds to wait for pong response (default: 5.0)
+    """
+    try:
+        while session_id in _game_sessions:
+            await asyncio.sleep(ping_interval)
+
+            # Send ping
+            try:
+                await websocket.send_json({"type": "ping", "timestamp": time.time()})
+            except Exception:
+                # Failed to send ping - connection is dead
+                logger.debug(f"Failed to send ping to player {player_id} - connection closed")
+                break
+
+            # Wait for pong
+            await asyncio.sleep(pong_timeout)
+
+            # Check if pong was received
+            last_pong = manager.get_last_pong_time(websocket)
+            time_since_pong = time.time() - last_pong
+
+            if time_since_pong > (ping_interval + pong_timeout):
+                # No recent pong - close connection
+                logger.warning(
+                    f"Player {player_id} failed to respond to ping "
+                    f"(last pong: {time_since_pong:.1f}s ago) - closing connection"
+                )
+                try:
+                    await websocket.close(code=1008, reason="Ping timeout")
+                except Exception:
+                    pass  # Connection might already be closed
+                break
+
+    except asyncio.CancelledError:
+        # Task was cancelled (normal during disconnect)
+        logger.debug(f"Heartbeat monitor for player {player_id} cancelled")
+    except Exception as e:
+        logger.error(f"Heartbeat monitor error for player {player_id}: {e}")
+
+
 @router.websocket("/ws")
 async def game_websocket(
     websocket: WebSocket,
@@ -183,6 +269,18 @@ async def game_websocket(
 
         # Start state broadcaster
         asyncio.create_task(state_broadcaster(session_id))
+
+    # Start heartbeat monitor
+    settings = get_settings()
+    asyncio.create_task(
+        heartbeat_monitor(
+            websocket,
+            session_id,
+            player_id,
+            ping_interval=settings.server.WEBSOCKET_PING_INTERVAL,
+            pong_timeout=5.0
+        )
+    )
 
     try:
         # Send initial connection success message
@@ -257,6 +355,10 @@ async def game_websocket(
                     nitro=input_data.get('nitro', False)
                 )
                 engine.update_player_input(player_id, player_input)
+
+            elif message['type'] == 'pong':
+                # Handle pong response - update last pong time
+                manager.update_pong_time(websocket)
 
             elif message['type'] == 'start_race':
                 # Start race countdown

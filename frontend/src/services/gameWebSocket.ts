@@ -67,7 +67,12 @@ export interface BotSubmissionResponseMessage {
   };
 }
 
-export type ServerMessage = GameStateMessage | ConnectedMessage | BotSubmissionResponseMessage;
+export interface PingMessage {
+  type: 'ping';
+  timestamp?: number;
+}
+
+export type ServerMessage = GameStateMessage | ConnectedMessage | BotSubmissionResponseMessage | PingMessage;
 
 export interface GameWebSocketCallbacks {
   onConnected?: (sessionId: string, playerId: string, track: Track) => void;
@@ -225,9 +230,25 @@ export class GameWebSocketClient {
         this.callbacks.onBotSubmissionResponse?.(message.data);
         break;
 
+      case 'ping':
+        // Respond to server ping with pong
+        this.sendPong();
+        break;
+
       default:
         console.warn('Unknown message type:', message);
     }
+  }
+
+  /**
+   * Send pong response to server ping.
+   */
+  private sendPong(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    this.ws.send(JSON.stringify({ type: 'pong' }));
   }
 
   /**
