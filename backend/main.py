@@ -8,6 +8,7 @@ Configures FastAPI with CORS, routes, and database.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import logging
 
 from app.config import get_settings
 from app.database import init_db
@@ -15,25 +16,33 @@ from app.api.routes import health, tracks, game, config, users, bots
 
 settings = get_settings()
 
+# Configure logging (can be controlled via LOG_LEVEL environment variable)
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+logger.info(f"Logging level set to: {settings.LOG_LEVEL.upper()}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for startup and shutdown events.
-    
+
     Handles:
     - Database initialisation on startup
     - Cleanup on shutdown
     """
     # Startup
-    print(f"Starting {settings.APP_NAME} v{settings.VERSION}")
+    logger.info(f"Starting {settings.APP_NAME} v{settings.VERSION}")
     init_db()
-    print(f"Server ready on {settings.server.HOST}:{settings.server.PORT}")
-    
+    logger.info(f"Server ready on {settings.server.HOST}:{settings.server.PORT}")
+
     yield
-    
+
     # Shutdown
-    print("Shutting down server...")
+    logger.info("Shutting down server...")
 
 
 # Create FastAPI application
@@ -60,6 +69,7 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|172\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+):(5173|5174|3000)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

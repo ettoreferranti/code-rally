@@ -97,7 +97,7 @@ class PhysicsConfig:
 class BotConfig:
     """Bot sandbox configuration."""
     MEMORY_LIMIT_MB: int = 50
-    EXECUTION_TIMEOUT_MS: int = 10
+    EXECUTION_TIMEOUT_MS: int = 50  # Increased from 10ms to 50ms for more reliable bot execution
     MAX_CODE_SIZE_KB: int = 100
     MAX_STORED_VERSIONS: int = 10
 
@@ -192,11 +192,14 @@ class Settings:
     car: CarConfig = None
     race: RaceConfig = None
     database: DatabaseConfig = None
-    
+
     # Application info
     APP_NAME: str = "CodeRally"
     VERSION: str = "0.1.0"
     DEBUG: bool = True
+
+    # Logging configuration
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     
     def __post_init__(self):
         self.server = self.server or ServerConfig()

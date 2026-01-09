@@ -118,10 +118,21 @@ class BotManager:
 
             # Convert result to BotActions
             if isinstance(result, dict):
+                logger.debug(f"Bot returned dict: {result}")
                 return BotActions.from_dict(result)
+            elif hasattr(result, 'accelerate'):
+                # Bot returned a BotActions-like object
+                logger.debug(f"Bot returned BotActions object: accel={result.accelerate}, brake={result.brake}")
+                return BotActions(
+                    accelerate=result.accelerate,
+                    brake=result.brake,
+                    turn_left=result.turn_left,
+                    turn_right=result.turn_right,
+                    use_nitro=result.use_nitro
+                )
             else:
                 # Bot returned invalid type - return safe default
-                logger.warning(f"Bot returned invalid type: {type(result)}")
+                logger.warning(f"Bot returned invalid type: {type(result)}, value: {result}")
                 return BotActions()
 
         except (SandboxTimeoutError, SandboxSecurityError) as e:
@@ -131,6 +142,8 @@ class BotManager:
         except Exception as e:
             # Unexpected error - log and return safe default
             logger.error(f"Unexpected bot error: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return BotActions()
 
     def _create_bot_game_state(
@@ -193,6 +206,20 @@ class BotManager:
         # Create track state
         next_checkpoint_idx = player.current_checkpoint
         checkpoints_list = [(cp.position[0], cp.position[1]) for cp in track.checkpoints]
+
+        # DEBUG: Log checkpoint info periodically (every 2 seconds at 20Hz)
+        if hasattr(self, '_debug_counter'):
+            self._debug_counter += 1
+        else:
+            self._debug_counter = 0
+
+        if self._debug_counter % 40 == 0:  # Every 2 seconds (40 ticks at 20Hz)
+            bot_pos = player.car.position
+            if next_checkpoint_idx < len(checkpoints_list):
+                cp_pos = checkpoints_list[next_checkpoint_idx]
+                import math
+                distance = math.sqrt((cp_pos[0] - bot_pos.x)**2 + (cp_pos[1] - bot_pos.y)**2)
+                logger.debug(f"Bot {player_id}: pos=({bot_pos.x:.1f},{bot_pos.y:.1f}), speed={player.car.velocity.magnitude():.1f}, cp={next_checkpoint_idx} at ({cp_pos[0]:.1f},{cp_pos[1]:.1f}), dist={distance:.1f}")
 
         bot_track = BotTrackState(
             checkpoints=checkpoints_list,

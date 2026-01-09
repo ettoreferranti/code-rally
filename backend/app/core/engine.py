@@ -281,6 +281,10 @@ class GameEngine:
 
         # Only update physics during active racing
         if self.state.race_info.status == RaceStatus.RACING:
+            # DEBUG: Log that physics is running
+            if self.state.tick % 120 == 0:  # Every 2 seconds
+                logger.debug(f"Physics running: tick={self.state.tick}, players={len(self.state.players)}")
+
             # Run bot logic at 20Hz (every 3rd physics tick)
             if self.bot_manager.should_run_bot_tick(self.state.tick):
                 self._update_bot_inputs()
@@ -297,6 +301,10 @@ class GameEngine:
 
             # Update race positions based on current progress
             self._update_race_positions()
+        else:
+            # DEBUG: Log non-racing status
+            if self.state.tick % 60 == 0:  # Every second
+                logger.debug(f"Race status: {self.state.race_info.status}, countdown: {self.state.race_info.countdown_remaining:.1f}s")
 
     def _update_race_status(self) -> None:
         """Update race countdown and status."""
@@ -349,6 +357,10 @@ class GameEngine:
                 )
 
                 if bot_actions is not None:
+                    # DEBUG: Log bot actions periodically
+                    if self.state.tick % 120 == 0:  # Every 2 seconds
+                        logger.debug(f"Bot {player.player_id} actions: accel={bot_actions.accelerate}, brake={bot_actions.brake}, left={bot_actions.turn_left}, right={bot_actions.turn_right}")
+
                     # Update player input from bot actions
                     player.input = PlayerInput(
                         accelerate=bot_actions.accelerate,
@@ -373,6 +385,10 @@ class GameEngine:
         Args:
             player: Player to update
         """
+        # DEBUG: Log physics update
+        if self.state.tick % 120 == 0 and player.is_bot:  # Every 2 seconds for bots only
+            logger.debug(f"Updating physics for {player.player_id}: input(accel={player.input.accelerate}, brake={player.input.brake}), vel={player.car.velocity.magnitude():.1f}")
+
         # Get surface at player position
         surface = self._get_surface_at_position(player.car.position)
         grip = self._get_grip_coefficient(surface)
