@@ -5,6 +5,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import type { GameState } from './types';
 import { Camera, renderTrack, renderCar, clearCanvas } from './renderer';
+import { StateBuffer } from './StateInterpolation';
 
 interface GameCanvasProps {
   gameState: GameState | null;
@@ -19,9 +20,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<Camera>(new Camera());
+  const stateBufferRef = useRef<StateBuffer>(new StateBuffer());
   const [fps, setFps] = useState<number>(0);
   const frameCountRef = useRef<number>(0);
   const lastFpsUpdateRef = useRef<number>(Date.now());
+
+  // Buffer incoming game states for interpolation
+  useEffect(() => {
+    if (gameState) {
+      stateBufferRef.current.addState(gameState, performance.now());
+    }
+  }, [gameState]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -56,10 +65,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // Clear canvas
       clearCanvas(ctx, canvas);
 
-      if (gameState) {
+      // Get interpolated state for smooth rendering
+      const interpolatedState = stateBufferRef.current.getInterpolatedState(currentTime);
+
+      if (interpolatedState) {
         // Update camera to follow current player's car
-        if (gameState.cars.length > 0) {
-          const playerCar = gameState.cars.find(car => car.isCurrentPlayer) || gameState.cars[0];
+        if (interpolatedState.cars.length > 0) {
+          const playerCar = interpolatedState.cars.find(car => car.isCurrentPlayer) || interpolatedState.cars[0];
           camera.follow(playerCar.position.x, playerCar.position.y, 0.1);
         }
 
@@ -67,10 +79,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         camera.apply(ctx, canvas);
 
         // Render track
-        renderTrack(ctx, gameState.track);
+        renderTrack(ctx, interpolatedState.track);
 
-        // Render all cars
-        gameState.cars.forEach((car) => {
+        // Render all cars with interpolated positions
+        interpolatedState.cars.forEach((car) => {
           // Current player is red, other humans are blue, bots are yellow
           let color = '#0000ff'; // Other players (blue)
           if (car.isCurrentPlayer) {
@@ -99,6 +111,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Cleanup
     return () => {
       cancelAnimationFrame(animationFrameId);
+      stateBufferRef.current.clear(); // Clear buffer on unmount
     };
   }, [gameState, width, height]);
 
