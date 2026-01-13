@@ -4,8 +4,9 @@
  * Provides CRUD operations for bots and user registration.
  */
 
-// Use the current hostname to support both localhost and network access
-const API_BASE_URL = `http://${window.location.hostname}:8000`;
+import { getApiBaseUrl } from '../config';
+
+const API_BASE_URL = getApiBaseUrl();
 
 // TypeScript interfaces matching backend models
 export interface User {

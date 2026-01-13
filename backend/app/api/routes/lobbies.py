@@ -60,6 +60,7 @@ class LobbySettingsResponse(BaseModel):
 class LobbyResponse(BaseModel):
     """Full lobby details response."""
     lobby_id: str
+    join_code: str
     name: str
     host_player_id: str
     settings: LobbySettingsResponse
@@ -72,6 +73,7 @@ class LobbyResponse(BaseModel):
 class LobbyListItemResponse(BaseModel):
     """Lobby list item for browse view."""
     lobby_id: str
+    join_code: str
     name: str
     host_player_id: str
     member_count: int
@@ -86,6 +88,7 @@ def _lobby_to_response(lobby) -> LobbyResponse:
     """Convert Lobby dataclass to LobbyResponse."""
     return LobbyResponse(
         lobby_id=lobby.lobby_id,
+        join_code=lobby.join_code,
         name=lobby.name,
         host_player_id=lobby.host_player_id,
         settings=LobbySettingsResponse(
@@ -114,6 +117,7 @@ def _lobby_to_list_item(lobby) -> LobbyListItemResponse:
     """Convert Lobby to list item response."""
     return LobbyListItemResponse(
         lobby_id=lobby.lobby_id,
+        join_code=lobby.join_code,
         name=lobby.name,
         host_player_id=lobby.host_player_id,
         member_count=lobby.get_member_count(),
@@ -221,6 +225,29 @@ async def get_lobby(lobby_id: str):
 
     if not lobby:
         raise HTTPException(status_code=404, detail=f"Lobby {lobby_id} not found")
+
+    return _lobby_to_response(lobby)
+
+
+@router.get("/join/{join_code}", response_model=LobbyResponse)
+async def get_lobby_by_code(join_code: str):
+    """
+    Get lobby by join code.
+
+    Args:
+        join_code: Join code (e.g., "FAST-TIGER-42")
+
+    Returns:
+        Full lobby details
+
+    Raises:
+        HTTPException: If lobby not found or code invalid
+    """
+    manager = get_lobby_manager()
+    lobby = manager.get_lobby_by_code(join_code)
+
+    if not lobby:
+        raise HTTPException(status_code=404, detail=f"No lobby found with code: {join_code}")
 
     return _lobby_to_response(lobby)
 

@@ -36,6 +36,7 @@ class TestLobbyDataStructures:
         """Test Lobby.is_host() method."""
         lobby = Lobby(
             lobby_id="lobby1",
+            join_code="TEST-CODE-01",
             name="Test Lobby",
             host_player_id="player1",
             settings=LobbySettings(),
@@ -49,6 +50,7 @@ class TestLobbyDataStructures:
         settings = LobbySettings(max_players=2)
         lobby = Lobby(
             lobby_id="lobby1",
+            join_code="TEST-CODE-02",
             name="Test Lobby",
             host_player_id="player1",
             settings=settings,
@@ -67,6 +69,7 @@ class TestLobbyDataStructures:
         """Test Lobby.can_start_race() conditions."""
         lobby = Lobby(
             lobby_id="lobby1",
+            join_code="TEST-CODE-03",
             name="Test Lobby",
             host_player_id="player1",
             settings=LobbySettings(),
@@ -89,6 +92,7 @@ class TestLobbyDataStructures:
         """Test Lobby.transfer_host() method."""
         lobby = Lobby(
             lobby_id="lobby1",
+            join_code="TEST-CODE-04",
             name="Test Lobby",
             host_player_id="player1",
             settings=LobbySettings(),

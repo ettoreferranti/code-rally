@@ -306,6 +306,7 @@ def serialize_lobby_state(lobby) -> dict:
     """
     return {
         'lobby_id': lobby.lobby_id,
+        'join_code': lobby.join_code,
         'name': lobby.name,
         'host_player_id': lobby.host_player_id,
         'status': lobby.status.value,

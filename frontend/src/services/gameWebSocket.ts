@@ -3,9 +3,9 @@
  */
 
 import type { Track, InputState } from '../game/types';
+import { getWsBaseUrl } from '../config';
 
-// Use the current hostname to support both localhost and network access
-const WS_BASE_URL = `ws://${window.location.hostname}:8000`;
+const WS_BASE_URL = getWsBaseUrl();
 
 export interface GameStateMessage {
   type: 'game_state';

@@ -3,6 +3,7 @@ import Layout from './components/Layout'
 import { Home, Practice, MultiplayerRace, Editor } from './pages'
 import LobbyBrowser from './pages/LobbyBrowser'
 import LobbyWaitingRoom from './pages/LobbyWaitingRoom'
+import JoinLobby from './pages/JoinLobby'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
           <Route path="editor" element={<Editor />} />
           <Route path="lobbies" element={<LobbyBrowser />} />
           <Route path="lobby/:lobbyId" element={<LobbyWaitingRoom />} />
+          <Route path="join/:code" element={<JoinLobby />} />
         </Route>
       </Routes>
     </BrowserRouter>

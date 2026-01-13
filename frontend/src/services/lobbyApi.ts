@@ -4,7 +4,9 @@
  * Provides functions to interact with the lobby system backend.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { getApiBaseUrl } from '../config';
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface LobbySettings {
   track_difficulty: string;
@@ -23,6 +25,7 @@ export interface LobbyMember {
 
 export interface LobbyListItem {
   lobby_id: string;
+  join_code: string;
   name: string;
   host_player_id: string;
   member_count: number;
@@ -33,6 +36,7 @@ export interface LobbyListItem {
 
 export interface Lobby {
   lobby_id: string;
+  join_code: string;
   name: string;
   host_player_id: string;
   settings: LobbySettings;
@@ -78,6 +82,18 @@ export async function fetchLobbies(status?: string): Promise<LobbyListItem[]> {
  */
 export async function fetchLobby(lobbyId: string): Promise<Lobby> {
   const response = await fetch(`${API_BASE_URL}/lobbies/${lobbyId}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch lobby: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch a specific lobby by join code.
+ */
+export async function fetchLobbyByCode(joinCode: string): Promise<Lobby> {
+  const response = await fetch(`${API_BASE_URL}/lobbies/join/${joinCode}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch lobby: ${response.statusText}`);
   }

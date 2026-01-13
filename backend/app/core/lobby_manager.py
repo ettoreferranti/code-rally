@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from app.core.lobby import Lobby, LobbyStatus, LobbySettings, LobbyMember
 from app.core.track import TrackGenerator, Track
+from app.core.join_code import generate_join_code
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class LobbyManager:
     def __init__(self):
         """Initialize lobby manager."""
         self._lobbies: Dict[str, Lobby] = {}
+        self._join_codes: Dict[str, str] = {}  # join_code -> lobby_id mapping
         self._lock = asyncio.Lock()  # Thread-safe operations
 
     def create_lobby(
@@ -46,8 +48,23 @@ class LobbyManager:
             Newly created Lobby instance
         """
         lobby_id = str(uuid4())
+
+        # Generate unique join code (retry if collision)
+        max_attempts = 10
+        join_code = None
+        for _ in range(max_attempts):
+            code = generate_join_code()
+            if code not in self._join_codes:
+                join_code = code
+                break
+
+        if not join_code:
+            # Fallback to UUID suffix if can't generate unique code
+            join_code = f"LOBBY-{lobby_id[:8].upper()}"
+
         lobby = Lobby(
             lobby_id=lobby_id,
+            join_code=join_code,
             name=name,
             host_player_id=host_player_id,
             settings=settings or LobbySettings(),
@@ -59,7 +76,8 @@ class LobbyManager:
             }
         )
         self._lobbies[lobby_id] = lobby
-        logger.info(f"Created lobby {lobby_id}: '{name}' (host: {host_player_id})")
+        self._join_codes[join_code] = lobby_id
+        logger.info(f"Created lobby {lobby_id} (code: {join_code}): '{name}' (host: {host_player_id})")
         return lobby
 
     def get_lobby(self, lobby_id: str) -> Optional[Lobby]:
@@ -73,6 +91,21 @@ class LobbyManager:
             Lobby if found, None otherwise
         """
         return self._lobbies.get(lobby_id)
+
+    def get_lobby_by_code(self, join_code: str) -> Optional[Lobby]:
+        """
+        Get lobby by join code.
+
+        Args:
+            join_code: Join code (e.g., "FAST-TIGER-42")
+
+        Returns:
+            Lobby if found, None otherwise
+        """
+        lobby_id = self._join_codes.get(join_code.upper())
+        if lobby_id:
+            return self._lobbies.get(lobby_id)
+        return None
 
     def list_lobbies(self, status_filter: Optional[LobbyStatus] = None) -> List[Lobby]:
         """
@@ -378,6 +411,10 @@ class LobbyManager:
             lobby_id: Lobby to clean up
         """
         if lobby_id in self._lobbies:
+            lobby = self._lobbies[lobby_id]
+            # Remove join code mapping
+            if lobby.join_code in self._join_codes:
+                del self._join_codes[lobby.join_code]
             del self._lobbies[lobby_id]
             logger.debug(f"Cleaned up lobby {lobby_id}")
 

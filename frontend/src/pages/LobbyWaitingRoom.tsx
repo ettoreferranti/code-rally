@@ -9,8 +9,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import type { Lobby, LobbyMember } from '../services';
 import { useUsername } from '../hooks/useUsername';
+import { getWsBaseUrl } from '../config';
 
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+const WS_BASE_URL = getWsBaseUrl();
 
 interface LobbyState extends Lobby {}
 
@@ -170,6 +171,23 @@ const LobbyWaitingRoom: React.FC = () => {
               className="px-4 py-2 bg-red-700 hover:bg-red-600 rounded"
             >
               Leave Lobby
+            </button>
+          </div>
+
+          {/* Join Code */}
+          <div className="mb-4 flex items-center gap-3">
+            <span className="text-sm text-gray-400">Join Code:</span>
+            <code className="text-2xl font-mono font-bold text-green-400 px-3 py-1 bg-gray-800 rounded">
+              {lobbyState.join_code}
+            </code>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(lobbyState.join_code);
+              }}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-sm"
+              title="Copy join code"
+            >
+              Copy
             </button>
           </div>
 

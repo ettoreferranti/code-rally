@@ -46,6 +46,7 @@ class LobbyMember:
 class Lobby:
     """Main lobby data structure."""
     lobby_id: str  # UUID
+    join_code: str  # Shareable code like "FAST-TIGER-42"
     name: str  # Display name
     host_player_id: str  # Player who created lobby
     settings: LobbySettings

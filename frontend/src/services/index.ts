@@ -20,6 +20,7 @@ export {
 export {
   fetchLobbies,
   fetchLobby,
+  fetchLobbyByCode,
   createLobby,
   updateLobbySettings,
   disbandLobby,

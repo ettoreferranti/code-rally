@@ -3,9 +3,9 @@
  */
 
 import type { Track } from '../game/types';
+import { getApiBaseUrl } from '../config';
 
-// Use the current hostname to support both localhost and network access
-const API_BASE_URL = `http://${window.location.hostname}:8000`;
+const API_BASE_URL = getApiBaseUrl();
 
 export interface GenerateTrackParams {
   difficulty?: 'easy' | 'medium' | 'hard';
