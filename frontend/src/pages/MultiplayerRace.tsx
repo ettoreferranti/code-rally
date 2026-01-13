@@ -38,6 +38,11 @@ export default function MultiplayerRace() {
     return urlParams.get('session_id') || undefined;
   }, []);
 
+  const playerIdFromUrl = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('player_id') || undefined;
+  }, []);
+
   const inputState = useKeyboardInput();
   const wsRef = useRef<GameWebSocketClient | null>(null);
   const inputIntervalRef = useRef<number | null>(null);
@@ -184,7 +189,7 @@ export default function MultiplayerRace() {
     });
 
     wsRef.current = ws;
-    ws.connect(sessionIdFromUrl, 'medium', seed);  // Connect with session from URL or create new
+    ws.connect(sessionIdFromUrl, 'medium', seed, playerIdFromUrl);  // Connect with session and player ID from URL
 
     // Cleanup on unmount
     return () => {

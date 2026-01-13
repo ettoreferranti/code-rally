@@ -98,7 +98,7 @@ export class GameWebSocketClient {
   /**
    * Connect to the game server.
    */
-  connect(sessionId?: string, difficulty: string = 'medium', seed?: number): void {
+  connect(sessionId?: string, difficulty: string = 'medium', seed?: number, playerId?: string): void {
     // Build WebSocket URL with query parameters
     const url = new URL(`${WS_BASE_URL}/game/ws`);
     if (sessionId) {
@@ -107,6 +107,9 @@ export class GameWebSocketClient {
     url.searchParams.append('difficulty', difficulty);
     if (seed !== undefined) {
       url.searchParams.append('seed', seed.toString());
+    }
+    if (playerId) {
+      url.searchParams.append('player_id', playerId);
     }
 
     this.ws = new WebSocket(url.toString());
@@ -154,7 +157,10 @@ export class GameWebSocketClient {
     }
 
     if (this.ws) {
-      this.ws.close();
+      // Only close if not already closed or closing (prevents React Strict Mode errors)
+      if (this.ws.readyState !== WebSocket.CLOSED && this.ws.readyState !== WebSocket.CLOSING) {
+        this.ws.close();
+      }
       this.ws = null;
     }
   }

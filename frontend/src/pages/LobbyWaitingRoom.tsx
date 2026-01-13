@@ -17,7 +17,7 @@ interface LobbyState extends Lobby {}
 const LobbyWaitingRoom: React.FC = () => {
   const { lobbyId } = useParams<{ lobbyId: string }>();
   const navigate = useNavigate();
-  const { username } = useUsername();
+  const { username, loading: usernameLoading } = useUsername();
 
   const [lobbyState, setLobbyState] = useState<LobbyState | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
@@ -30,6 +30,9 @@ const LobbyWaitingRoom: React.FC = () => {
   // Connect to WebSocket on mount
   useEffect(() => {
     if (!lobbyId) return;
+
+    // Wait for username to load before connecting
+    if (usernameLoading) return;
 
     // Build WebSocket URL with lobby_id and optional player_id (username)
     let wsUrl = `${WS_BASE_URL}/game/ws?lobby_id=${lobbyId}`;
@@ -82,9 +85,11 @@ const LobbyWaitingRoom: React.FC = () => {
           break;
 
         case 'race_starting':
-          // Race is starting - navigate to race page
+          // Race is starting - navigate to race page with session and player ID
           const gameSessionId = message.data.game_session_id;
-          navigate(`/race?session_id=${gameSessionId}`);
+          // Use username directly (it's what we used to join the lobby)
+          const playerIdParam = username ? `&player_id=${encodeURIComponent(username)}` : '';
+          navigate(`/race?session_id=${gameSessionId}${playerIdParam}`);
           break;
 
         case 'error':
@@ -117,7 +122,7 @@ const LobbyWaitingRoom: React.FC = () => {
         ws.close();
       }
     };
-  }, [lobbyId, navigate, username]);
+  }, [lobbyId, navigate, username, usernameLoading]);
 
   const handleStartRace = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -143,7 +148,11 @@ const LobbyWaitingRoom: React.FC = () => {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
         <div className="text-xl">
-          {isConnected ? 'Loading lobby...' : 'Connecting...'}
+          {usernameLoading
+            ? 'Loading user...'
+            : isConnected
+              ? 'Loading lobby...'
+              : 'Connecting...'}
         </div>
       </div>
     );

@@ -29,6 +29,12 @@ _game_sessions: Dict[str, GameEngine] = {}
 # WebSocket connections (session_id -> set of WebSockets)
 _connections: Dict[str, Set[WebSocket]] = {}
 
+# Active state broadcasters (session_id set)
+_active_broadcasters: Set[str] = set()
+
+# Track which sessions came from lobbies (don't auto-cleanup on disconnect)
+_lobby_sessions: Set[str] = set()
+
 
 class ConnectionManager:
     """Manages WebSocket connections for multiplayer games."""
@@ -187,11 +193,22 @@ async def state_broadcaster(session_id: str, update_rate: int = 60) -> None:
         session_id: Game session to broadcast
         update_rate: Updates per second (Hz)
     """
-    interval = 1.0 / update_rate
+    global _active_broadcasters
 
-    while session_id in _game_sessions and session_id in manager.active_connections:
-        await broadcast_game_state(session_id)
-        await asyncio.sleep(interval)
+    # Mark this broadcaster as active
+    _active_broadcasters.add(session_id)
+
+    try:
+        interval = 1.0 / update_rate
+
+        while session_id in _game_sessions:
+            # Only broadcast if there are connections
+            if session_id in manager.active_connections:
+                await broadcast_game_state(session_id)
+            await asyncio.sleep(interval)
+    finally:
+        # Clean up when broadcaster stops
+        _active_broadcasters.discard(session_id)
 
 
 async def heartbeat_monitor(
@@ -402,6 +419,9 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
     engine = GameEngine(track)
     _game_sessions[game_session_id] = engine
 
+    # Mark this session as coming from a lobby (don't auto-cleanup on player disconnect)
+    _lobby_sessions.add(game_session_id)
+
     # Add all lobby members to game engine
     lobby = lobby_manager.get_lobby(lobby_id)
     for member in lobby.members.values():
@@ -422,8 +442,8 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
     # Start engine loop
     await engine.start_loop()
 
-    # Start state broadcaster
-    asyncio.create_task(state_broadcaster(game_session_id))
+    # Don't start broadcaster here - it will be started when first player connects
+    # (prevents broadcaster from exiting immediately due to no connections)
 
     # Transition lobby to RACING
     lobby_manager.transition_to_racing(lobby_id)
@@ -605,7 +625,8 @@ async def game_websocket(
         if not engine._running:
             await engine.start_loop()
 
-            # Start state broadcaster
+        # Start state broadcaster if not already running
+        if session_id not in _active_broadcasters:
             asyncio.create_task(state_broadcaster(session_id))
 
         # Start heartbeat monitor
@@ -673,7 +694,9 @@ async def game_websocket(
         })
 
         # Add player to game AFTER successful connection message
-        engine.add_player(player_id)
+        # Only add if not already in engine (e.g., from lobby)
+        if player_id not in engine.state.players:
+            engine.add_player(player_id)
 
     try:
         # Listen for player inputs and lobby messages
@@ -794,8 +817,9 @@ async def game_websocket(
             # Direct mode - cleanup session
             manager.disconnect(websocket, session_id)
 
-            # Remove player from game engine
-            if engine:
+            # Remove player from game engine (only for non-lobby sessions)
+            # Lobby sessions manage their own player lifecycle
+            if engine and session_id not in _lobby_sessions:
                 try:
                     engine.remove_player(player_id)
                 except Exception:
