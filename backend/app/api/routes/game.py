@@ -13,6 +13,8 @@ from uuid import uuid4
 from app.core.engine import GameEngine, PlayerInput, RaceStatus
 from app.core.track import TrackGenerator
 from app.core.bot_manager import BotError
+from app.core.lobby import LobbyStatus
+from app.core.lobby_manager import get_lobby_manager
 from app.config import get_settings
 from app.database import SessionLocal
 from app.services import bot_service
@@ -35,6 +37,8 @@ class ConnectionManager:
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         # Track connection metadata (last pong time, player info)
         self.connection_metadata: Dict[WebSocket, dict] = {}
+        # Track player ID to WebSocket mapping (for lobby messaging)
+        self.player_to_ws: Dict[str, WebSocket] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str, player_id: str) -> None:
         """Accept a new WebSocket connection."""
@@ -52,6 +56,9 @@ class ConnectionManager:
             'session_id': session_id
         }
 
+        # Track player -> websocket mapping
+        self.player_to_ws[player_id] = websocket
+
     def disconnect(self, websocket: WebSocket, session_id: str) -> None:
         """Remove a WebSocket connection."""
         if session_id in self.active_connections:
@@ -61,8 +68,11 @@ class ConnectionManager:
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
 
-        # Clean up metadata
+        # Clean up metadata and player mapping
         if websocket in self.connection_metadata:
+            player_id = self.connection_metadata[websocket].get('player_id')
+            if player_id and player_id in self.player_to_ws:
+                del self.player_to_ws[player_id]
             del self.connection_metadata[websocket]
 
     def update_pong_time(self, websocket: WebSocket) -> None:
@@ -96,6 +106,28 @@ class ConnectionManager:
         # Remove disconnected clients
         for connection in disconnected:
             self.disconnect(connection, session_id)
+
+    async def send_to_player(self, player_id: str, message: dict) -> bool:
+        """
+        Send a message to a specific player.
+
+        Args:
+            player_id: Player identifier
+            message: Message to send
+
+        Returns:
+            True if sent successfully, False if player not connected
+        """
+        if player_id not in self.player_to_ws:
+            return False
+
+        websocket = self.player_to_ws[player_id]
+        try:
+            await websocket.send_json(message)
+            return True
+        except Exception:
+            # Failed to send - connection might be dead
+            return False
 
 
 manager = ConnectionManager()
@@ -220,9 +252,297 @@ async def heartbeat_monitor(
         logger.error(f"Heartbeat monitor error for player {player_id}: {e}")
 
 
+# ===== Lobby Functions =====
+
+async def broadcast_to_lobby(lobby_id: str, message: dict, exclude_player_id: Optional[str] = None) -> None:
+    """
+    Broadcast a message to all members of a lobby.
+
+    Args:
+        lobby_id: Lobby identifier
+        message: Message to broadcast
+        exclude_player_id: Optional player ID to exclude from broadcast
+    """
+    lobby_manager = get_lobby_manager()
+    lobby = lobby_manager.get_lobby(lobby_id)
+
+    if not lobby:
+        return
+
+    # Send to all members
+    for member in lobby.members.values():
+        if exclude_player_id and member.player_id == exclude_player_id:
+            continue
+
+        await manager.send_to_player(member.player_id, message)
+
+
+def serialize_lobby_state(lobby) -> dict:
+    """
+    Serialize lobby state for WebSocket transmission.
+
+    Args:
+        lobby: Lobby dataclass
+
+    Returns:
+        Serialized lobby state
+    """
+    return {
+        'lobby_id': lobby.lobby_id,
+        'name': lobby.name,
+        'host_player_id': lobby.host_player_id,
+        'status': lobby.status.value,
+        'settings': {
+            'track_difficulty': lobby.settings.track_difficulty,
+            'track_seed': lobby.settings.track_seed,
+            'max_players': lobby.settings.max_players,
+            'finish_grace_period': lobby.settings.finish_grace_period
+        },
+        'members': [
+            {
+                'player_id': member.player_id,
+                'username': member.username,
+                'is_bot': member.is_bot,
+                'bot_id': member.bot_id,
+                'ready': member.ready
+            }
+            for member in lobby.members.values()
+        ],
+        'game_session_id': lobby.game_session_id
+    }
+
+
+async def handle_join_lobby(lobby_id: str, player_id: str, username: Optional[str], websocket: WebSocket) -> None:
+    """
+    Handle player joining a lobby via WebSocket.
+
+    Args:
+        lobby_id: Lobby to join
+        player_id: Player identifier
+        username: Optional player username
+        websocket: WebSocket connection
+    """
+    lobby_manager = get_lobby_manager()
+
+    # Join lobby
+    success = lobby_manager.join_lobby(lobby_id, player_id, username)
+
+    if not success:
+        await websocket.send_json({
+            'type': 'error',
+            'data': {'message': 'Failed to join lobby (not found, full, or wrong status)'}
+        })
+        return
+
+    # Get updated lobby
+    lobby = lobby_manager.get_lobby(lobby_id)
+
+    # Send lobby joined confirmation with player_id to joining player
+    await websocket.send_json({
+        'type': 'lobby_joined',
+        'data': {
+            'player_id': player_id,
+            'lobby': serialize_lobby_state(lobby)
+        }
+    })
+
+    # Broadcast updated lobby state to OTHER members (exclude self)
+    await broadcast_to_lobby(lobby_id, {
+        'type': 'lobby_state',
+        'data': serialize_lobby_state(lobby)
+    }, exclude_player_id=player_id)
+
+
+async def handle_leave_lobby(lobby_id: str, player_id: str) -> None:
+    """
+    Handle player leaving a lobby.
+
+    Args:
+        lobby_id: Lobby to leave
+        player_id: Player identifier
+    """
+    lobby_manager = get_lobby_manager()
+
+    # Leave lobby (also handles host transfer and auto-disband)
+    lobby_manager.leave_lobby(lobby_id, player_id)
+
+    # Broadcast member left
+    await broadcast_to_lobby(lobby_id, {
+        'type': 'lobby_member_left',
+        'data': {'player_id': player_id}
+    })
+
+    # Note: If lobby was disbanded, broadcast_to_lobby will do nothing (lobby gone)
+
+
+async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebSocket) -> None:
+    """
+    Handle host starting race from lobby.
+
+    Args:
+        lobby_id: Lobby identifier
+        player_id: Player attempting start (must be host)
+        websocket: WebSocket connection
+    """
+    lobby_manager = get_lobby_manager()
+
+    # Start race (validates host, creates track, transitions to STARTING)
+    result = lobby_manager.start_race(lobby_id, player_id)
+
+    if not result:
+        await websocket.send_json({
+            'type': 'error',
+            'data': {'message': 'Failed to start race (not host, wrong status, or lobby not found)'}
+        })
+        return
+
+    game_session_id, track = result
+
+    # Create game engine
+    engine = GameEngine(track)
+    _game_sessions[game_session_id] = engine
+
+    # Add all lobby members to game engine
+    lobby = lobby_manager.get_lobby(lobby_id)
+    for member in lobby.members.values():
+        if member.is_bot:
+            # Add bot player
+            try:
+                engine.add_bot_player(
+                    member.player_id,
+                    member.bot_code,
+                    member.bot_class_name
+                )
+            except BotError as e:
+                logger.error(f"Failed to add bot {member.player_id} to race: {e}")
+        else:
+            # Add human player
+            engine.add_player(member.player_id)
+
+    # Start engine loop
+    await engine.start_loop()
+
+    # Start state broadcaster
+    asyncio.create_task(state_broadcaster(game_session_id))
+
+    # Transition lobby to RACING
+    lobby_manager.transition_to_racing(lobby_id)
+
+    # Broadcast race starting to all lobby members
+    await broadcast_to_lobby(lobby_id, {
+        'type': 'race_starting',
+        'data': {
+            'game_session_id': game_session_id,
+            'track': {
+                'segments': [
+                    {
+                        'start': {
+                            'x': seg.start.x,
+                            'y': seg.start.y,
+                            'width': seg.start.width,
+                            'surface': seg.start.surface.value if hasattr(seg.start.surface, 'value') else seg.start.surface
+                        },
+                        'end': {
+                            'x': seg.end.x,
+                            'y': seg.end.y,
+                            'width': seg.end.width,
+                            'surface': seg.end.surface.value if hasattr(seg.end.surface, 'value') else seg.end.surface
+                        },
+                        'control1': list(seg.control1) if seg.control1 else None,
+                        'control2': list(seg.control2) if seg.control2 else None,
+                    }
+                    for seg in track.segments
+                ],
+                'checkpoints': [
+                    {
+                        'position': list(cp.position),
+                        'angle': cp.angle,
+                        'width': cp.width
+                    }
+                    for cp in track.checkpoints
+                ],
+                'start_position': list(track.start_position),
+                'start_heading': track.start_heading,
+                'obstacles': [
+                    {
+                        'position': list(obs.position),
+                        'radius': obs.radius,
+                        'type': obs.type
+                    }
+                    for obs in (track.obstacles or [])
+                ],
+                'containment': {
+                    'left_points': [list(p) for p in track.containment.left_points],
+                    'right_points': [list(p) for p in track.containment.right_points]
+                } if track.containment else None
+            }
+        }
+    })
+
+
+async def handle_add_bot_to_lobby(lobby_id: str, player_id: str, bot_id: int, websocket: WebSocket) -> None:
+    """
+    Handle adding a bot to lobby.
+
+    Args:
+        lobby_id: Lobby identifier
+        player_id: Player adding bot (for ownership check)
+        bot_id: Database bot ID
+        websocket: WebSocket connection
+    """
+    lobby_manager = get_lobby_manager()
+
+    # Fetch bot from database
+    db = SessionLocal()
+    try:
+        bot = bot_service.get_bot_by_id(db, bot_id)
+        if not bot:
+            await websocket.send_json({
+                'type': 'error',
+                'data': {'message': 'Bot not found'}
+            })
+            return
+
+        # Extract class name
+        bot_class_name = bot_service.extract_class_name(bot.code)
+        if not bot_class_name:
+            await websocket.send_json({
+                'type': 'error',
+                'data': {'message': 'No bot class found in code'}
+            })
+            return
+
+        # Add bot to lobby
+        bot_player_id = lobby_manager.add_bot_to_lobby(
+            lobby_id=lobby_id,
+            bot_id=bot_id,
+            bot_code=bot.code,
+            bot_class_name=bot_class_name,
+            owner_username=bot.owner.username
+        )
+
+        if not bot_player_id:
+            await websocket.send_json({
+                'type': 'error',
+                'data': {'message': 'Failed to add bot (lobby full, wrong status, or bot already added)'}
+            })
+            return
+
+        # Broadcast updated lobby state
+        lobby = lobby_manager.get_lobby(lobby_id)
+        await broadcast_to_lobby(lobby_id, {
+            'type': 'lobby_state',
+            'data': serialize_lobby_state(lobby)
+        })
+
+    finally:
+        db.close()
+
+
 @router.websocket("/ws")
 async def game_websocket(
     websocket: WebSocket,
+    lobby_id: Optional[str] = Query(default=None),
     session_id: Optional[str] = Query(default=None),
     difficulty: str = Query(default="medium"),
     seed: Optional[int] = Query(default=None)
@@ -257,33 +577,48 @@ async def game_websocket(
     # Generate unique player ID
     player_id = str(uuid4())
 
-    # Get or create game session
-    session_id, engine = get_or_create_session(session_id, difficulty, seed)
+    # Determine connection mode
+    is_lobby_mode = lobby_id is not None
 
-    # Connect player
-    await manager.connect(websocket, session_id, player_id)
+    if is_lobby_mode:
+        # Lobby mode - don't create session yet, wait for lobby to start race
+        # Connect without session_id (will be set when race starts)
+        await manager.connect(websocket, lobby_id, player_id)
 
-    # Start game loop if not already running
-    if not engine._running:
-        await engine.start_loop()
+        # Join lobby
+        await handle_join_lobby(lobby_id, player_id, None, websocket)
 
-        # Start state broadcaster
-        asyncio.create_task(state_broadcaster(session_id))
+        # Note: Session will be created when host starts race
+        session_id = None
+        engine = None
+    else:
+        # Direct mode (legacy) - create/join session immediately
+        session_id, engine = get_or_create_session(session_id, difficulty, seed)
 
-    # Start heartbeat monitor
-    settings = get_settings()
-    asyncio.create_task(
-        heartbeat_monitor(
-            websocket,
-            session_id,
-            player_id,
-            ping_interval=settings.server.WEBSOCKET_PING_INTERVAL,
-            pong_timeout=5.0
+        # Connect player
+        await manager.connect(websocket, session_id, player_id)
+
+    # Start game loop and send initial messages (direct mode only)
+    if not is_lobby_mode:
+        if not engine._running:
+            await engine.start_loop()
+
+            # Start state broadcaster
+            asyncio.create_task(state_broadcaster(session_id))
+
+        # Start heartbeat monitor
+        settings = get_settings()
+        asyncio.create_task(
+            heartbeat_monitor(
+                websocket,
+                session_id,
+                player_id,
+                ping_interval=settings.server.WEBSOCKET_PING_INTERVAL,
+                pong_timeout=5.0
+            )
         )
-    )
 
-    try:
-        # Send initial connection success message
+        # Send initial connection success message (direct mode only)
         await websocket.send_json({
             'type': 'connected',
             'data': {
@@ -338,34 +673,55 @@ async def game_websocket(
         # Add player to game AFTER successful connection message
         engine.add_player(player_id)
 
-        # Listen for player inputs
+    try:
+        # Listen for player inputs and lobby messages
         while True:
             # Receive message from client
             data = await websocket.receive_text()
             message = json.loads(data)
 
-            if message['type'] == 'input':
-                # Update player input
-                input_data = message['data']
-                player_input = PlayerInput(
-                    accelerate=input_data.get('accelerate', False),
-                    brake=input_data.get('brake', False),
-                    turn_left=input_data.get('turn_left', False),
-                    turn_right=input_data.get('turn_right', False),
-                    nitro=input_data.get('nitro', False)
-                )
-                engine.update_player_input(player_id, player_input)
+            # Lobby-specific messages
+            if message['type'] == 'leave_lobby':
+                await handle_leave_lobby(lobby_id, player_id)
+                break  # Exit loop after leaving
+
+            elif message['type'] == 'start_race' and is_lobby_mode:
+                # Host starting race from lobby
+                await handle_lobby_start_race(lobby_id, player_id, websocket)
+
+            elif message['type'] == 'add_bot_to_lobby':
+                # Add bot to lobby
+                bot_id = message['data'].get('bot_id')
+                await handle_add_bot_to_lobby(lobby_id, player_id, bot_id, websocket)
+
+            # Game input messages
+            elif message['type'] == 'input':
+                # Update player input (only if engine exists)
+                if engine:
+                    input_data = message['data']
+                    player_input = PlayerInput(
+                        accelerate=input_data.get('accelerate', False),
+                        brake=input_data.get('brake', False),
+                        turn_left=input_data.get('turn_left', False),
+                        turn_right=input_data.get('turn_right', False),
+                        nitro=input_data.get('nitro', False)
+                    )
+                    engine.update_player_input(player_id, player_input)
 
             elif message['type'] == 'pong':
                 # Handle pong response - update last pong time
                 manager.update_pong_time(websocket)
 
-            elif message['type'] == 'start_race':
-                # Start race countdown
-                engine.start_race()
+            elif message['type'] == 'start_race' and not is_lobby_mode:
+                # Start race countdown (direct mode only)
+                if engine:
+                    engine.start_race()
 
-            elif message['type'] == 'submit_bot':
-                # Submit a bot to the race
+            elif message['type'] == 'submit_bot' and not is_lobby_mode:
+                # Submit a bot to the race (direct mode only)
+                if not engine:
+                    continue
+
                 bot_id = message['data'].get('bot_id')
 
                 # Validate race status
@@ -428,19 +784,26 @@ async def game_websocket(
 
     except (WebSocketDisconnect, Exception) as e:
         # Player disconnected or connection error
-        manager.disconnect(websocket, session_id)
+        if is_lobby_mode:
+            # Lobby mode - handle leave and cleanup
+            manager.disconnect(websocket, lobby_id)
+            await handle_leave_lobby(lobby_id, player_id)
+        else:
+            # Direct mode - cleanup session
+            manager.disconnect(websocket, session_id)
 
-        # Remove player from game engine
-        try:
-            engine.remove_player(player_id)
-        except Exception:
-            pass  # Player might not have been added yet
+            # Remove player from game engine
+            if engine:
+                try:
+                    engine.remove_player(player_id)
+                except Exception:
+                    pass  # Player might not have been added yet
 
-        # If no players left, stop the engine and clean up
-        if not engine.state.players:
-            await engine.stop_loop()
-            if session_id in _game_sessions:
-                del _game_sessions[session_id]
+                # If no players left, stop the engine and clean up
+                if not engine.state.players:
+                    await engine.stop_loop()
+                    if session_id in _game_sessions:
+                        del _game_sessions[session_id]
 
 
 @router.get("/sessions")

@@ -12,7 +12,7 @@ import logging
 
 from app.config import get_settings
 from app.database import init_db
-from app.api.routes import health, tracks, game, config, users, bots
+from app.api.routes import health, tracks, game, config, users, bots, lobbies
 
 settings = get_settings()
 
@@ -82,6 +82,7 @@ app.include_router(tracks.router, tags=["tracks"])
 app.include_router(game.router, tags=["game"])
 app.include_router(users.router, tags=["users"])
 app.include_router(bots.router, tags=["bots"])
+app.include_router(lobbies.router, tags=["lobbies"])
 
 
 @app.get("/")

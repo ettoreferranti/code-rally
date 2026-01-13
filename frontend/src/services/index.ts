@@ -17,3 +17,16 @@ export {
   type CreateBotRequest,
   type UpdateBotRequest,
 } from './botApi';
+export {
+  fetchLobbies,
+  fetchLobby,
+  createLobby,
+  updateLobbySettings,
+  disbandLobby,
+  type LobbySettings,
+  type LobbyMember,
+  type LobbyListItem,
+  type Lobby,
+  type CreateLobbyRequest,
+  type UpdateSettingsRequest,
+} from './lobbyApi';
