@@ -8,6 +8,14 @@ Each template demonstrates different racing strategies and API features.
 # Template metadata for frontend integration
 TEMPLATES = [
     {
+        "id": "test_bot",
+        "name": "Test Bot (Debug)",
+        "difficulty": 0,
+        "description": "DEBUG: Minimal bot that just accelerates. For testing the sandbox.",
+        "features": ["Hardcoded actions"],
+        "file": "test_bot.py"
+    },
+    {
         "id": "simple_follower",
         "name": "Simple Follower",
         "difficulty": 1,

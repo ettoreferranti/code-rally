@@ -53,12 +53,7 @@ export default function MultiplayerRace() {
     nitro: false,
   });
 
-  // Log when game state changes
-  useEffect(() => {
-    if (gameState) {
-      console.log('Game state updated! Tick:', gameState.tick, 'Status:', gameState.raceInfo);
-    }
-  }, [gameState]);
+  // Game state updates every tick (60 FPS) - no need to log this
 
   // Load user's bots
   useEffect(() => {
@@ -90,23 +85,19 @@ export default function MultiplayerRace() {
       },
 
       onGameState: (state: GameStateMessage['data']) => {
-        console.log('Received game state update:', state.tick, state.race_info.status);
-
         // Use refs to get current values (avoids closure issue)
         const currentTrack = trackRef.current;
         const currentPlayerId = playerIdRef.current;
 
-        console.log('Current track:', currentTrack, 'playerId:', currentPlayerId);
-
         // Convert server state to frontend GameState format
         if (!currentTrack || !currentPlayerId) {
-          console.log('Missing track or playerId, skipping update - track:', currentTrack, 'playerId:', currentPlayerId);
+          console.warn('Missing track or playerId, skipping game state update');
           return;
         }
 
         const playerData = state.players[currentPlayerId];
         if (!playerData) {
-          console.log('No player data for', currentPlayerId);
+          console.warn('No player data found for player:', currentPlayerId);
           return;
         }
 
@@ -145,7 +136,6 @@ export default function MultiplayerRace() {
           }
         };
 
-        console.log('Setting game state, tick:', state.tick);
         setGameState(newGameState);
 
         // Check if race has finished and collect results
@@ -226,13 +216,6 @@ export default function MultiplayerRace() {
       inputState.nitro !== lastInput.nitro;
 
     if (hasChanged) {
-      // Only log when there's actual input
-      if (inputState.accelerate || inputState.brake || inputState.turnLeft || inputState.turnRight || inputState.nitro) {
-        console.log('Input changed, sending:', inputState);
-      } else {
-        console.log('Input released (all keys up)');
-      }
-
       wsRef.current.sendInput(inputState);
       lastInputRef.current = { ...inputState };
     }

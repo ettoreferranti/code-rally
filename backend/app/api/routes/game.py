@@ -544,6 +544,7 @@ async def game_websocket(
     websocket: WebSocket,
     lobby_id: Optional[str] = Query(default=None),
     session_id: Optional[str] = Query(default=None),
+    player_id: Optional[str] = Query(default=None),
     difficulty: str = Query(default="medium"),
     seed: Optional[int] = Query(default=None)
 ):
@@ -574,8 +575,9 @@ async def game_websocket(
         }
     }
     """
-    # Generate unique player ID
-    player_id = str(uuid4())
+    # Use provided player ID (username) or generate unique ID
+    if not player_id:
+        player_id = str(uuid4())
 
     # Determine connection mode
     is_lobby_mode = lobby_id is not None
@@ -585,8 +587,8 @@ async def game_websocket(
         # Connect without session_id (will be set when race starts)
         await manager.connect(websocket, lobby_id, player_id)
 
-        # Join lobby
-        await handle_join_lobby(lobby_id, player_id, None, websocket)
+        # Join lobby (use player_id as username since we passed it in)
+        await handle_join_lobby(lobby_id, player_id, player_id, websocket)
 
         # Note: Session will be created when host starts race
         session_id = None

@@ -358,9 +358,19 @@ class BotSandbox:
             if "'NoneType' object is not callable" in str(e):
                 raise SandboxSecurityError(f"Bot attempted to use blocked function: {str(e)}")
             # Other TypeErrors are bot logic errors - return safe default
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Bot TypeError in on_tick(): {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {'accelerate': False, 'brake': False, 'turn_left': False, 'turn_right': False, 'use_nitro': False}
         except Exception as e:
             # Bot code error - return safe default
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Bot Exception in on_tick(): {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {'accelerate': False, 'brake': False, 'turn_left': False, 'turn_right': False, 'use_nitro': False}
 
     def call_on_collision(self, bot_instance: Any, event: Any) -> None:

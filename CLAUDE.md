@@ -212,6 +212,58 @@ export { GameCanvas, useGameLoop, renderCar };
 - Follow BEM naming if using plain CSS
 - Keep styles co-located with components
 
+### Logging and Debugging
+
+**CRITICAL**: Use proper logging libraries, not direct console/print statements.
+
+#### Backend (Python)
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Use appropriate log levels
+logger.debug('Detailed information for debugging')     # Development only
+logger.info('General informational messages')          # Important events
+logger.warning('Warning messages')                      # Potential issues
+logger.error('Error messages')                          # Errors that don't crash
+logger.critical('Critical errors')                      # Severe errors
+
+# ❌ DON'T: Use print() in production code
+print("Game state updated")  # WRONG - floods console
+
+# ✅ DO: Use logging with appropriate levels
+logger.debug("Game state updated: tick=%d", tick)  # Only shows in DEBUG mode
+```
+
+#### Frontend (TypeScript/React)
+```typescript
+// Use console methods with appropriate levels
+console.debug('Detailed debug info');    // Development only
+console.log('General information');      // Important events
+console.warn('Warning messages');        // Potential issues
+console.error('Error messages');         // Actual errors
+
+// ❌ DON'T: Log on every render/tick
+useEffect(() => {
+  console.log('State updated');  // WRONG - floods console at 60 FPS
+}, [gameState]);
+
+// ✅ DO: Log only important state changes
+useEffect(() => {
+  if (gameState?.raceInfo.raceStatus === 'finished') {
+    console.log('Race finished!');  // Only logs once when race ends
+  }
+}, [gameState?.raceInfo.raceStatus]);
+```
+
+#### Cleanup Rules
+1. **Remove debug logging** after fixing bugs - don't leave console floods behind
+2. **Use DEBUG level** for verbose logging during development
+3. **Never log on every tick/frame** - this creates unusable console output
+4. **Keep production logs clean** - only log important events (errors, state transitions, user actions)
+5. **Use structured logging** with context (e.g., `logger.info('Race started', extra={'race_id': race_id})`)
+
 ## Key Architectural Decisions
 
 ### Server-Authoritative Game State

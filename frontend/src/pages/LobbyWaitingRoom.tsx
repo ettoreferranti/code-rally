@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import type { Lobby, LobbyMember } from '../services';
+import { useUsername } from '../hooks/useUsername';
 
 const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
 
@@ -16,6 +17,7 @@ interface LobbyState extends Lobby {}
 const LobbyWaitingRoom: React.FC = () => {
   const { lobbyId } = useParams<{ lobbyId: string }>();
   const navigate = useNavigate();
+  const { username } = useUsername();
 
   const [lobbyState, setLobbyState] = useState<LobbyState | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
@@ -29,7 +31,13 @@ const LobbyWaitingRoom: React.FC = () => {
   useEffect(() => {
     if (!lobbyId) return;
 
-    const ws = new WebSocket(`${WS_BASE_URL}/game/ws?lobby_id=${lobbyId}`);
+    // Build WebSocket URL with lobby_id and optional player_id (username)
+    let wsUrl = `${WS_BASE_URL}/game/ws?lobby_id=${lobbyId}`;
+    if (username) {
+      wsUrl += `&player_id=${encodeURIComponent(username)}`;
+    }
+
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -109,7 +117,7 @@ const LobbyWaitingRoom: React.FC = () => {
         ws.close();
       }
     };
-  }, [lobbyId, navigate]);
+  }, [lobbyId, navigate, username]);
 
   const handleStartRace = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {

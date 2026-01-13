@@ -7,9 +7,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchLobbies, createLobby, type LobbyListItem } from '../services';
+import { useUsername } from '../hooks/useUsername';
 
 const LobbyBrowser: React.FC = () => {
   const navigate = useNavigate();
+  const { username } = useUsername();
   const [lobbies, setLobbies] = useState<LobbyListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,16 +49,19 @@ const LobbyBrowser: React.FC = () => {
       return;
     }
 
+    if (!username) {
+      setError('You must be logged in to create a lobby');
+      return;
+    }
+
     setCreating(true);
     setError(null);
 
     try {
-      // Generate a temporary player ID (will be replaced by WebSocket)
-      const tempPlayerId = `player-${Date.now()}`;
-
+      // Use username as host player ID (will match WebSocket connection)
       const lobby = await createLobby({
         name: newLobbyName,
-        host_player_id: tempPlayerId,
+        host_player_id: username,
         track_difficulty: difficulty,
         max_players: maxPlayers,
       });

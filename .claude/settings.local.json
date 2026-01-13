@@ -28,7 +28,6 @@
       "Bash(npx tsc --noEmit)",
       "Bash(cd:*)",
       "Bash(cd /Users/ettore/Library/Mobile\\ Documents/com~apple~CloudDocs/Code/code-rally && gh issue edit:*)",
-      "Bash(gh issue edit 145 --body \"Multi-stage rally championship series with cumulative scoring (WRC-style).\n\n**Requirements:**\n- Create championship with N rally stages\n- Track points across stages (configurable points system)\n- Championship leaderboard\n- Final standings and rewards\n- Save/resume championship progress\n\n**Features:**\n- Different point-to-point stages per event\n- Varied conditions (surfaces, weather)\n- Season-long progression\n- Stage times determine positions and points\n\n**Notes:**\nQuick Stage exists. Championship adds longer-term competitive structure similar to WRC rally championship format.\")",
       "Bash(./venv/bin/python:*)",
       "Bash(/Users/ettore/Library/Mobile\\ Documents/com~apple~CloudDocs/Code/code-rally/backend/venv/bin/python:*)",
       "Bash(gh issue create:*)",
@@ -45,7 +44,19 @@
       "Bash(gh issue comment:*)",
       "Bash(git rm:*)",
       "Bash(chmod:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(uvicorn:*)",
+      "Bash(./backend/venv/bin/python -c \"from backend.app.api.routes.game import router; from backend.app.core.engine import GameEngine; print(''✓ Backend imports successful'')\")",
+      "Bash(sqlite3:*)",
+      "Bash(ls:*)",
+      "Bash(./venv/bin/uvicorn:*)",
+      "Bash(npm test:*)",
+      "Bash(kill:*)",
+      "Bash(git log:*)",
+      "Bash(for issue in 122 123 124 125 126 127)",
+      "Bash(do echo \"=== Issue #$issue ===\")",
+      "Bash(done)",
+      "Bash(gh pr list:*)"
     ],
     "deny": [],
     "ask": []

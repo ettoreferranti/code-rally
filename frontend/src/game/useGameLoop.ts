@@ -64,8 +64,6 @@ export function useGameLoop(
     }, 10);
 
     const startLoop = () => {
-      console.log('[GameLoop] Starting continuous game loop');
-
       const physics = physicsRef.current;
       let running = true;
       let animationFrameId: number;
@@ -76,15 +74,9 @@ export function useGameLoop(
         prevCarPosRef.current = { ...initialState.cars[0].position };
       }
 
-      let frameCount = 0;
       const gameLoop = (currentTime: number) => {
         if (!running || !currentGameStateRef.current) {
           return;
-        }
-
-        frameCount++;
-        if (frameCount % 60 === 0) {
-          console.log('[GameLoop] Frame:', frameCount, 'Tick:', currentGameStateRef.current.tick);
         }
 
         // Initialize lastTick on first frame
@@ -159,7 +151,6 @@ export function useGameLoop(
 
     // Cleanup function (only on unmount)
     return () => {
-      console.log('[GameLoop] Stopping game loop (component unmounting)');
       clearInterval(waitForGameState);
     };
   }, []); // Empty deps - only run once on mount, cleanup on unmount

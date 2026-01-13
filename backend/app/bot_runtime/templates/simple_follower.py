@@ -29,7 +29,11 @@ class SimpleFollower(GuardedBotBase):
     def __init__(self):
         """Initialize the bot. Called once when the bot is loaded."""
         self.name = "Simple Follower"
-        self.steering_threshold = 0.1  # Don't turn for tiny angle differences
+        # Max speed - VERY slow to eliminate drift entirely
+        self.max_speed = 60
+        # State memory to prevent oscillation
+        self.last_turn_left = False
+        self.last_turn_right = False
 
     def on_tick(self, state):
         """
@@ -45,114 +49,101 @@ class SimpleFollower(GuardedBotBase):
         """
 
         # ============================================================
-        # STEP 1: Read Sensor Data
+        # STEP 1: Get Next Checkpoint
         # ============================================================
 
-        # Your bot has 7 raycasts (vision sensors) arranged like this:
-        #
-        #      ray[2]  ray[1]  ray[0]   <- 45°, 22°, 0° (forward)
-        #           \    |    /
-        #            \   |   /
-        # ray[3] ──── YOUR CAR ──── (forward = ray[0])
-        #            /   |   \
-        #           /    |    \
-        #      ray[4]  ray[5]  ray[6]   <- -45°, -22°, 0° (forward)
-        #
-        # Each ray returns:
-        # - distance: How far until hitting something (max 200 units)
-        # - hit_type: What it hit ("boundary", "car", "obstacle", or None)
-
-        # Ray 0: Straight ahead
-        front_ray = state.rays[0]
-
-        # Ray 2: Forward-left (45 degrees left)
-        left_ray = state.rays[2]
-
-        # Ray 4: Forward-right (45 degrees right)
-        right_ray = state.rays[4]
-
-
-        # ============================================================
-        # STEP 2: Calculate Direction to Checkpoint
-        # ============================================================
-
-        # Get next checkpoint position
         checkpoints = state.track.checkpoints
         next_cp_idx = state.track.next_checkpoint
 
         # Check if we've finished (no more checkpoints)
         if next_cp_idx >= len(checkpoints):
-            # Keep going straight
             return BotActions(accelerate=True, brake=False)
 
         # Get target checkpoint
         target = checkpoints[next_cp_idx]
 
-        # Calculate angle to target
+
+        # ============================================================
+        # STEP 2: Calculate Angle to Checkpoint
+        # ============================================================
+
+        # My position and target position
         my_x = state.car.position[0]
         my_y = state.car.position[1]
         target_x = target[0]
         target_y = target[1]
 
+        # Vector from me to target
         dx = target_x - my_x
         dy = target_y - my_y
 
-        # Use atan2 to get angle (in radians) to checkpoint
+        # Angle to target (in radians)
         target_angle = math.atan2(dy, dx)
 
-        # Calculate how much we need to turn
+        # How much I need to turn (difference between target angle and my heading)
         angle_diff = target_angle - state.car.heading
 
         # Normalize angle to [-π, +π]
         while angle_diff > math.pi:
-            angle_diff -= 2 * math.pi
+            angle_diff = angle_diff - (2 * math.pi)
         while angle_diff < -math.pi:
-            angle_diff += 2 * math.pi
+            angle_diff = angle_diff + (2 * math.pi)
 
 
         # ============================================================
-        # STEP 3: Decide Steering (toward checkpoint, avoid obstacles)
+        # STEP 3: Decide Steering (with Hysteresis to prevent oscillation)
         # ============================================================
 
-        # Default: steer toward checkpoint
-        should_turn_left = angle_diff > self.steering_threshold
-        should_turn_right = angle_diff < -self.steering_threshold
+        # Hysteresis: Don't flip-flop steering every tick
+        # If we were turning left, keep turning left unless angle flips significantly right
+        # If we were turning right, keep turning right unless angle flips significantly left
 
-        # Override if obstacle is very close (emergency avoidance)
-        if front_ray.distance < 30:
-            # Obstacle ahead! Turn away from it
-            if left_ray.distance > right_ray.distance:
-                # More space on left
-                should_turn_left = True
-                should_turn_right = False
-            else:
-                # More space on right
-                should_turn_left = False
-                should_turn_right = True
+        if self.last_turn_left:
+            # We were turning left - keep turning left unless angle is now significantly right
+            should_turn_left = angle_diff > -0.7  # Keep turning left unless > 40° to right
+            should_turn_right = angle_diff < -0.7  # Only turn right if WAY to the right
+        elif self.last_turn_right:
+            # We were turning right - keep turning right unless angle is now significantly left
+            should_turn_left = angle_diff > 0.7  # Only turn left if WAY to the left
+            should_turn_right = angle_diff < 0.7  # Keep turning right unless > 40° to left
+        else:
+            # First decision or going straight - use normal thresholds
+            should_turn_left = angle_diff > 0.5
+            should_turn_right = angle_diff < -0.5
+
+        # Update memory for next tick
+        self.last_turn_left = should_turn_left
+        self.last_turn_right = should_turn_right
 
 
         # ============================================================
-        # STEP 4: Decide Speed
+        # STEP 4: Decide Speed (Intentionally Conservative)
         # ============================================================
 
-        # Brake if obstacle very close OR making sharp turn
-        should_brake = front_ray.distance < 30 or abs(angle_diff) > 0.8
+        # Read front raycast to detect obstacles
+        front_ray = state.rays[0]
+        current_speed = state.car.speed
 
-        # Accelerate if not braking
-        should_accelerate = not should_brake
+        # Strategy: Stay VERY slow to eliminate drift
+        # Brake if:
+        # 1. Going too fast (> max_speed) OR
+        # 2. Obstacle is very close (< 30 units)
+        should_brake = (current_speed > self.max_speed) or (front_ray.distance < 30)
+
+        # Accelerate only if slow AND not braking
+        should_accelerate = (current_speed < self.max_speed - 5) and (not should_brake)
 
 
         # ============================================================
         # STEP 5: Return Actions
         # ============================================================
 
-        # Return a BotActions object (or dictionary) with your decisions
         return BotActions(
             accelerate=should_accelerate,
             brake=should_brake,
             turn_left=should_turn_left,
             turn_right=should_turn_right,
-            use_nitro=False  # Not using nitro in this simple bot
+            use_nitro=False
         )
 
 
