@@ -1,0 +1,9 @@
+# Optional dependencies for the LLM agent (issue #151).
+# Required only if you want to run LLM-driven cars locally.
+# Apple Silicon only.
+#
+# Install with:
+#   pip install -r backend/requirements-agents.txt
+
+mlx>=0.18.0
+mlx-lm>=0.19.0
