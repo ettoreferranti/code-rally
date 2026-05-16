@@ -11,8 +11,15 @@ Public API:
     - MLXRuntime / get_mlx_generate_fn: optional MLX-backed generation
 """
 
+from app.agents.controller import Controller, ControlInputs
 from app.agents.intent import Intent
 from app.agents.llm_strategist import LLMStrategist
 from app.agents.observation import format_observation
 
-__all__ = ["Intent", "LLMStrategist", "format_observation"]
+__all__ = [
+    "Controller",
+    "ControlInputs",
+    "Intent",
+    "LLMStrategist",
+    "format_observation",
+]
