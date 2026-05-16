@@ -108,6 +108,7 @@ export interface GameState {
   cars: CarState[];
   tick: number;
   raceInfo: RaceInfo;
+  spectatorCount?: number;
 }
 
 /**

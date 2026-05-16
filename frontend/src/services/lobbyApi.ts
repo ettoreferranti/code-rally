@@ -32,6 +32,8 @@ export interface LobbyListItem {
   max_players: number;
   status: string;
   created_at: number;
+  spectator_count: number;
+  game_session_id: string | null;
 }
 
 export interface Lobby {
@@ -44,6 +46,7 @@ export interface Lobby {
   status: string;
   created_at: number;
   game_session_id: string | null;
+  spectator_count: number;
 }
 
 export interface CreateLobbyRequest {

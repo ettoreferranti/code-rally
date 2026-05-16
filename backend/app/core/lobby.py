@@ -51,6 +51,7 @@ class Lobby:
     host_player_id: str  # Player who created lobby
     settings: LobbySettings
     members: Dict[str, LobbyMember]  # player_id -> LobbyMember
+    spectators: Dict[str, LobbyMember] = field(default_factory=dict)  # player_id -> LobbyMember
     status: LobbyStatus = LobbyStatus.WAITING
     created_at: float = field(default_factory=time.time)
 
@@ -61,8 +62,12 @@ class Lobby:
     track: Optional['Track'] = None  # Forward reference to avoid circular import
 
     def get_member_count(self) -> int:
-        """Get number of members in lobby."""
+        """Get number of members in lobby (excludes spectators)."""
         return len(self.members)
+
+    def get_spectator_count(self) -> int:
+        """Get number of spectators in lobby."""
+        return len(self.spectators)
 
     def is_host(self, player_id: str) -> bool:
         """Check if player is the lobby host."""

@@ -35,6 +35,9 @@ _active_broadcasters: Set[str] = set()
 # Track which sessions came from lobbies (don't auto-cleanup on disconnect)
 _lobby_sessions: Set[str] = set()
 
+# Spectator connections (session_id -> set of WebSockets)
+_spectator_connections: Dict[str, Set[WebSocket]] = {}
+
 
 class ConnectionManager:
     """Manages WebSocket connections for multiplayer games."""
@@ -170,12 +173,16 @@ def get_or_create_session(session_id: Optional[str] = None, difficulty: str = "m
 
 
 async def broadcast_game_state(session_id: str) -> None:
-    """Broadcast current game state to all players in a session."""
+    """Broadcast current game state to all players and spectators in a session."""
     if session_id not in _game_sessions:
         return
 
     engine = _game_sessions[session_id]
     state = engine.get_state_snapshot()
+
+    # Inject spectator count
+    spectator_count = len(_spectator_connections.get(session_id, set()))
+    state['spectator_count'] = spectator_count
 
     message = {
         'type': 'game_state',
@@ -183,6 +190,20 @@ async def broadcast_game_state(session_id: str) -> None:
     }
 
     await manager.broadcast(message, session_id)
+
+    # Also broadcast to spectators
+    if session_id in _spectator_connections:
+        json_message = json.dumps(message)
+        disconnected = []
+        for ws in list(_spectator_connections[session_id]):
+            try:
+                await ws.send_text(json_message)
+            except Exception:
+                disconnected.append(ws)
+        for ws in disconnected:
+            _spectator_connections[session_id].discard(ws)
+            if not _spectator_connections[session_id]:
+                del _spectator_connections[session_id]
 
 
 async def state_broadcaster(session_id: str, update_rate: int = 60) -> None:
@@ -273,7 +294,7 @@ async def heartbeat_monitor(
 
 async def broadcast_to_lobby(lobby_id: str, message: dict, exclude_player_id: Optional[str] = None) -> None:
     """
-    Broadcast a message to all members of a lobby.
+    Broadcast a message to all members and spectators of a lobby.
 
     Args:
         lobby_id: Lobby identifier
@@ -292,6 +313,13 @@ async def broadcast_to_lobby(lobby_id: str, message: dict, exclude_player_id: Op
             continue
 
         await manager.send_to_player(member.player_id, message)
+
+    # Send to all spectators
+    for spectator in lobby.spectators.values():
+        if exclude_player_id and spectator.player_id == exclude_player_id:
+            continue
+
+        await manager.send_to_player(spectator.player_id, message)
 
 
 def serialize_lobby_state(lobby) -> dict:
@@ -326,7 +354,8 @@ def serialize_lobby_state(lobby) -> dict:
             }
             for member in lobby.members.values()
         ],
-        'game_session_id': lobby.game_session_id
+        'game_session_id': lobby.game_session_id,
+        'spectator_count': lobby.get_spectator_count()
     }
 
 
@@ -560,6 +589,67 @@ async def handle_add_bot_to_lobby(lobby_id: str, player_id: str, bot_id: int, we
         db.close()
 
 
+async def handle_spectate_lobby(lobby_id: str, player_id: str, username: Optional[str], websocket: WebSocket) -> None:
+    """
+    Handle spectator joining a lobby via WebSocket.
+
+    Args:
+        lobby_id: Lobby to spectate
+        player_id: Spectator identifier
+        username: Optional spectator username
+        websocket: WebSocket connection
+    """
+    lobby_manager = get_lobby_manager()
+
+    # Join as spectator
+    success = lobby_manager.spectate_lobby(lobby_id, player_id, username)
+
+    if not success:
+        await websocket.send_json({
+            'type': 'error',
+            'data': {'message': 'Failed to spectate lobby (not found or wrong status)'}
+        })
+        return
+
+    # Get lobby state
+    lobby = lobby_manager.get_lobby(lobby_id)
+
+    # Send spectator joined confirmation
+    await websocket.send_json({
+        'type': 'spectator_joined',
+        'data': {
+            'player_id': player_id,
+            'lobby': serialize_lobby_state(lobby)
+        }
+    })
+
+    # Broadcast updated lobby state to other members and spectators
+    await broadcast_to_lobby(lobby_id, {
+        'type': 'lobby_state',
+        'data': serialize_lobby_state(lobby)
+    }, exclude_player_id=player_id)
+
+
+async def handle_leave_spectate(lobby_id: str, player_id: str) -> None:
+    """
+    Handle spectator leaving a lobby.
+
+    Args:
+        lobby_id: Lobby to leave
+        player_id: Spectator identifier
+    """
+    lobby_manager = get_lobby_manager()
+    lobby_manager.remove_spectator(lobby_id, player_id)
+
+    # Broadcast updated state
+    lobby = lobby_manager.get_lobby(lobby_id)
+    if lobby:
+        await broadcast_to_lobby(lobby_id, {
+            'type': 'lobby_state',
+            'data': serialize_lobby_state(lobby)
+        })
+
+
 @router.websocket("/ws")
 async def game_websocket(
     websocket: WebSocket,
@@ -567,7 +657,8 @@ async def game_websocket(
     session_id: Optional[str] = Query(default=None),
     player_id: Optional[str] = Query(default=None),
     difficulty: str = Query(default="medium"),
-    seed: Optional[int] = Query(default=None)
+    seed: Optional[int] = Query(default=None),
+    spectate: bool = Query(default=False)
 ):
     """
     WebSocket endpoint for real-time multiplayer racing.
@@ -602,18 +693,145 @@ async def game_websocket(
 
     # Determine connection mode
     is_lobby_mode = lobby_id is not None
+    is_spectator = spectate
 
     if is_lobby_mode:
-        # Lobby mode - don't create session yet, wait for lobby to start race
-        # Connect without session_id (will be set when race starts)
+        # Connect to lobby WebSocket
         await manager.connect(websocket, lobby_id, player_id)
 
-        # Join lobby (use player_id as username since we passed it in)
-        await handle_join_lobby(lobby_id, player_id, player_id, websocket)
+        if is_spectator:
+            # Spectator mode - join as spectator
+            await handle_spectate_lobby(lobby_id, player_id, player_id, websocket)
+
+            # If lobby is already racing, send track data and connect to game session
+            lobby_manager = get_lobby_manager()
+            lobby = lobby_manager.get_lobby(lobby_id)
+            if lobby and lobby.status == LobbyStatus.RACING and lobby.game_session_id:
+                game_sid = lobby.game_session_id
+                if game_sid in _game_sessions:
+                    engine_for_track = _game_sessions[game_sid]
+                    track = engine_for_track.state.track
+                    await websocket.send_json({
+                        'type': 'race_starting',
+                        'data': {
+                            'game_session_id': game_sid,
+                            'track': {
+                                'segments': [
+                                    {
+                                        'start': {
+                                            'x': seg.start.x,
+                                            'y': seg.start.y,
+                                            'width': seg.start.width,
+                                            'surface': seg.start.surface.value if hasattr(seg.start.surface, 'value') else seg.start.surface
+                                        },
+                                        'end': {
+                                            'x': seg.end.x,
+                                            'y': seg.end.y,
+                                            'width': seg.end.width,
+                                            'surface': seg.end.surface.value if hasattr(seg.end.surface, 'value') else seg.end.surface
+                                        },
+                                        'control1': list(seg.control1) if seg.control1 else None,
+                                        'control2': list(seg.control2) if seg.control2 else None,
+                                    }
+                                    for seg in track.segments
+                                ],
+                                'checkpoints': [
+                                    {
+                                        'position': list(cp.position),
+                                        'angle': cp.angle,
+                                        'width': cp.width
+                                    }
+                                    for cp in track.checkpoints
+                                ],
+                                'start_position': list(track.start_position),
+                                'start_heading': track.start_heading,
+                                'obstacles': [
+                                    {
+                                        'position': list(obs.position),
+                                        'radius': obs.radius,
+                                        'type': obs.type
+                                    }
+                                    for obs in (track.obstacles or [])
+                                ],
+                                'containment': {
+                                    'left_points': [list(p) for p in track.containment.left_points],
+                                    'right_points': [list(p) for p in track.containment.right_points]
+                                } if track.containment else None
+                            }
+                        }
+                    })
+        else:
+            # Regular player mode - join lobby as member
+            await handle_join_lobby(lobby_id, player_id, player_id, websocket)
 
         # Note: Session will be created when host starts race
         session_id = None
         engine = None
+    elif is_spectator and session_id:
+        # Direct spectate mode - spectate an existing game session
+        await websocket.accept()
+
+        # Add to spectator connections
+        if session_id not in _spectator_connections:
+            _spectator_connections[session_id] = set()
+        _spectator_connections[session_id].add(websocket)
+
+        # Send connected message with track data
+        if session_id in _game_sessions:
+            engine = _game_sessions[session_id]
+            track = engine.state.track
+            await websocket.send_json({
+                'type': 'connected',
+                'data': {
+                    'session_id': session_id,
+                    'player_id': player_id,
+                    'track': {
+                        'segments': [
+                            {
+                                'start': {
+                                    'x': seg.start.x,
+                                    'y': seg.start.y,
+                                    'width': seg.start.width,
+                                    'surface': seg.start.surface.value if hasattr(seg.start.surface, 'value') else seg.start.surface
+                                },
+                                'end': {
+                                    'x': seg.end.x,
+                                    'y': seg.end.y,
+                                    'width': seg.end.width,
+                                    'surface': seg.end.surface.value if hasattr(seg.end.surface, 'value') else seg.end.surface
+                                },
+                                'control1': list(seg.control1) if seg.control1 else None,
+                                'control2': list(seg.control2) if seg.control2 else None,
+                            }
+                            for seg in track.segments
+                        ],
+                        'checkpoints': [
+                            {
+                                'position': list(cp.position),
+                                'angle': cp.angle,
+                                'width': cp.width
+                            }
+                            for cp in track.checkpoints
+                        ],
+                        'start_position': list(track.start_position),
+                        'start_heading': track.start_heading,
+                        'obstacles': [
+                            {
+                                'position': list(obs.position),
+                                'radius': obs.radius,
+                                'type': obs.type
+                            }
+                            for obs in (track.obstacles or [])
+                        ],
+                        'containment': {
+                            'left_points': [list(p) for p in track.containment.left_points],
+                            'right_points': [list(p) for p in track.containment.right_points]
+                        } if track.containment else None
+                    }
+                }
+            })
+
+        engine = None  # Spectators don't have engine access
     else:
         # Direct mode (legacy) - create/join session immediately
         session_id, engine = get_or_create_session(session_id, difficulty, seed)
@@ -621,8 +839,8 @@ async def game_websocket(
         # Connect player
         await manager.connect(websocket, session_id, player_id)
 
-    # Start game loop and send initial messages (direct mode only)
-    if not is_lobby_mode:
+    # Start game loop and send initial messages (direct mode only, not spectators)
+    if not is_lobby_mode and not is_spectator:
         if not engine._running:
             await engine.start_loop()
 
@@ -705,6 +923,16 @@ async def game_websocket(
             # Receive message from client
             data = await websocket.receive_text()
             message = json.loads(data)
+
+            # Spectators can only send pong and leave messages
+            if is_spectator:
+                if message['type'] == 'pong':
+                    manager.update_pong_time(websocket)
+                elif message['type'] == 'leave_lobby' and is_lobby_mode:
+                    await handle_leave_spectate(lobby_id, player_id)
+                    break
+                # All other messages (input, start_race, etc.) are silently ignored
+                continue
 
             # Lobby-specific messages
             if message['type'] == 'leave_lobby':
@@ -809,8 +1037,19 @@ async def game_websocket(
                     db.close()
 
     except (WebSocketDisconnect, Exception) as e:
-        # Player disconnected or connection error
-        if is_lobby_mode:
+        # Handle disconnect cleanup
+        if is_spectator:
+            # Spectator disconnect
+            if is_lobby_mode:
+                manager.disconnect(websocket, lobby_id)
+                await handle_leave_spectate(lobby_id, player_id)
+            else:
+                # Direct spectate - remove from spectator connections
+                if session_id in _spectator_connections:
+                    _spectator_connections[session_id].discard(websocket)
+                    if not _spectator_connections[session_id]:
+                        del _spectator_connections[session_id]
+        elif is_lobby_mode:
             # Lobby mode - handle leave and cleanup
             manager.disconnect(websocket, lobby_id)
             await handle_leave_lobby(lobby_id, player_id)

@@ -87,6 +87,7 @@ export class GameWebSocketClient {
   private callbacks: GameWebSocketCallbacks;
   private reconnectTimeout: number | null = null;
   private shouldReconnect: boolean = true;
+  private _isSpectator: boolean = false;
 
   public sessionId: string | null = null;
   public playerId: string | null = null;
@@ -95,10 +96,17 @@ export class GameWebSocketClient {
     this.callbacks = callbacks;
   }
 
+  /** Whether this client is connected as a spectator. */
+  get isSpectator(): boolean {
+    return this._isSpectator;
+  }
+
   /**
    * Connect to the game server.
    */
-  connect(sessionId?: string, difficulty: string = 'medium', seed?: number, playerId?: string): void {
+  connect(sessionId?: string, difficulty: string = 'medium', seed?: number, playerId?: string, spectate?: boolean): void {
+    this._isSpectator = spectate || false;
+
     // Build WebSocket URL with query parameters
     const url = new URL(`${WS_BASE_URL}/game/ws`);
     if (sessionId) {
@@ -110,6 +118,9 @@ export class GameWebSocketClient {
     }
     if (playerId) {
       url.searchParams.append('player_id', playerId);
+    }
+    if (spectate) {
+      url.searchParams.append('spectate', 'true');
     }
 
     this.ws = new WebSocket(url.toString());
@@ -166,10 +177,10 @@ export class GameWebSocketClient {
   }
 
   /**
-   * Send player input to the server.
+   * Send player input to the server. No-op for spectators.
    */
   sendInput(input: InputState): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this._isSpectator) {
       return;
     }
 

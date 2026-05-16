@@ -30,9 +30,12 @@ const LobbyBrowser: React.FC = () => {
 
   const loadLobbies = async () => {
     try {
-      // Only show waiting lobbies (joinable)
-      const data = await fetchLobbies('waiting');
-      setLobbies(data);
+      // Show waiting (joinable) and racing (spectatable) lobbies
+      const [waiting, racing] = await Promise.all([
+        fetchLobbies('waiting'),
+        fetchLobbies('racing'),
+      ]);
+      setLobbies([...waiting, ...racing]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load lobbies');
@@ -76,6 +79,16 @@ const LobbyBrowser: React.FC = () => {
 
   const handleJoinLobby = (lobbyId: string) => {
     navigate(`/lobby/${lobbyId}`);
+  };
+
+  const handleSpectateLobby = (lobby: LobbyListItem) => {
+    if (lobby.status === 'racing' && lobby.game_session_id) {
+      // Racing lobby - go directly to race as spectator
+      navigate(`/race?session_id=${lobby.game_session_id}&spectate=true`);
+    } else {
+      // Waiting lobby - go to waiting room as spectator
+      navigate(`/lobby/${lobby.lobby_id}?spectate=true`);
+    }
   };
 
   if (loading && lobbies.length === 0) {
@@ -135,19 +148,39 @@ const LobbyBrowser: React.FC = () => {
                   <p>
                     Players: {lobby.member_count} / {lobby.max_players}
                   </p>
-                  <p className="text-sm">Status: {lobby.status}</p>
+                  <p className="text-sm">
+                    Status:{' '}
+                    <span className={lobby.status === 'racing' ? 'text-green-400 font-semibold' : ''}>
+                      {lobby.status === 'racing' ? 'In Race' : lobby.status}
+                    </span>
+                  </p>
+                  {lobby.spectator_count > 0 && (
+                    <p className="text-sm text-gray-400">
+                      Spectators: {lobby.spectator_count}
+                    </p>
+                  )}
                 </div>
-                <button
-                  onClick={() => handleJoinLobby(lobby.lobby_id)}
-                  disabled={lobby.member_count >= lobby.max_players}
-                  className={`w-full py-2 rounded font-semibold ${
-                    lobby.member_count >= lobby.max_players
-                      ? 'bg-gray-600 cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-500'
-                  }`}
-                >
-                  {lobby.member_count >= lobby.max_players ? 'Full' : 'Join Lobby'}
-                </button>
+                <div className="flex gap-2">
+                  {lobby.status === 'waiting' && (
+                    <button
+                      onClick={() => handleJoinLobby(lobby.lobby_id)}
+                      disabled={lobby.member_count >= lobby.max_players}
+                      className={`flex-1 py-2 rounded font-semibold ${
+                        lobby.member_count >= lobby.max_players
+                          ? 'bg-gray-600 cursor-not-allowed'
+                          : 'bg-green-600 hover:bg-green-500'
+                      }`}
+                    >
+                      {lobby.member_count >= lobby.max_players ? 'Full' : 'Join'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleSpectateLobby(lobby)}
+                    className={`${lobby.status === 'racing' ? 'flex-1' : ''} py-2 px-4 rounded font-semibold bg-purple-600 hover:bg-purple-500`}
+                  >
+                    Spectate
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { GameCanvas, useKeyboardInput } from '../game';
-import type { GameState, Track, PlayerResult } from '../game/types';
+import type { GameState, Track, PlayerResult, InputState } from '../game/types';
 import { RaceHUD } from '../components/RaceHUD';
 import { CountdownOverlay } from '../components/CountdownOverlay';
 import { RaceResultsScreen } from '../components/RaceResultsScreen';
@@ -42,6 +42,15 @@ export default function MultiplayerRace() {
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get('player_id') || undefined;
   }, []);
+
+  const isSpectator = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('spectate') === 'true';
+  }, []);
+
+  // Spectator camera state
+  const [cameraMode, setCameraMode] = useState<'follow' | 'free'>('follow');
+  const [followTarget, setFollowTarget] = useState<string | null>(null);
 
   const inputState = useKeyboardInput();
   const wsRef = useRef<GameWebSocketClient | null>(null);
@@ -95,14 +104,17 @@ export default function MultiplayerRace() {
         const currentPlayerId = playerIdRef.current;
 
         // Convert server state to frontend GameState format
-        if (!currentTrack || !currentPlayerId) {
-          console.warn('Missing track or playerId, skipping game state update');
+        if (!currentTrack) {
+          console.warn('Missing track, skipping game state update');
           return;
         }
 
-        const playerData = state.players[currentPlayerId];
-        if (!playerData) {
-          console.warn('No player data found for player:', currentPlayerId);
+        // For spectators, use the first player's data as reference for race info
+        const playerIds = Object.keys(state.players);
+        const playerData = currentPlayerId ? state.players[currentPlayerId] : null;
+        const referencePlayer = playerData || (playerIds.length > 0 ? state.players[playerIds[0]] : null);
+
+        if (!referencePlayer) {
           return;
         }
 
@@ -126,17 +138,18 @@ export default function MultiplayerRace() {
             botName: pData.bot_name,
           })),
           tick: state.tick,
+          spectatorCount: (state as any).spectator_count || 0,
           raceInfo: {
-            currentCheckpoint: playerData.current_checkpoint,
+            currentCheckpoint: referencePlayer.current_checkpoint,
             totalCheckpoints: currentTrack.checkpoints.length,
-            isFinished: playerData.is_finished,
-            finishTime: playerData.finish_time,
+            isFinished: referencePlayer.is_finished,
+            finishTime: referencePlayer.finish_time,
             startTime: state.race_info.start_time,
             countdownRemaining: state.race_info.countdown_remaining,
             raceStatus: state.race_info.status,
             firstFinisherTime: state.race_info.first_finisher_time,
             gracePeriodRemaining: state.race_info.grace_period_remaining,
-            currentPosition: playerData.position,
+            currentPosition: referencePlayer.position,
             totalPlayers: Object.keys(state.players).length,
           }
         };
@@ -189,7 +202,7 @@ export default function MultiplayerRace() {
     });
 
     wsRef.current = ws;
-    ws.connect(sessionIdFromUrl, 'medium', seed, playerIdFromUrl);  // Connect with session and player ID from URL
+    ws.connect(sessionIdFromUrl, 'medium', seed, playerIdFromUrl, isSpectator);  // Connect with session and player ID from URL
 
     // Cleanup on unmount
     return () => {
@@ -303,93 +316,188 @@ export default function MultiplayerRace() {
     );
   }
 
+  // Get list of player IDs for spectator follow target selection
+  const playerList = gameState ? gameState.cars
+    .filter(car => car.playerId)
+    .map(car => ({
+      id: car.playerId!,
+      name: car.botName || car.playerId!.substring(0, 12),
+      isBot: car.isBot,
+    })) : [];
+
   return (
     <div className="p-8">
-      <h2 className="text-3xl font-bold mb-4">Multiplayer Rally Stage (Server-Authoritative)</h2>
+      <div className="flex items-center gap-3 mb-4">
+        <h2 className="text-3xl font-bold">Multiplayer Rally Stage</h2>
+        {isSpectator && (
+          <span className="px-3 py-1 bg-purple-700 text-purple-200 text-sm rounded font-semibold">
+            SPECTATING
+          </span>
+        )}
+      </div>
       <div className="mb-4 flex gap-4 items-center flex-wrap">
         <div className="text-gray-300">
           <span className="font-semibold">Session:</span> {sessionId?.substring(0, 8)}...
-          {sessionIdFromUrl && (
-            <span className="ml-2 px-2 py-1 text-xs bg-blue-600 rounded">Joined</span>
-          )}
         </div>
-        <div className="text-gray-300">
-          <span className="font-semibold">Player ID:</span> {playerId?.substring(0, 8)}...
-        </div>
-        <div className="text-gray-300">
-          <span className="font-semibold">Players:</span> {gameState?.raceInfo.totalPlayers || 1}
-        </div>
-        <div className="text-gray-300">
-          <span className="font-semibold">Track Seed:</span> {seed}
-          <button
-            onClick={() => navigator.clipboard.writeText(seed.toString())}
-            className="ml-2 px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600"
-            title="Copy seed to clipboard"
-          >
-            📋 Copy
-          </button>
-        </div>
-        <button
-          onClick={handleShareSession}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          title="Copy shareable session link to clipboard"
-        >
-          👥 Share Session
-        </button>
-        {!raceStarted && (
-          <button
-            onClick={handleStartRace}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-          >
-            Start Race
-          </button>
+        {!isSpectator && (
+          <div className="text-gray-300">
+            <span className="font-semibold">Player ID:</span> {playerId?.substring(0, 8)}...
+          </div>
         )}
-        {userBots.length > 0 && (
-          <div className="flex gap-2 items-center">
-            <select
-              value={selectedBotId || ''}
-              onChange={(e) => setSelectedBotId(Number(e.target.value))}
-              className="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600"
-            >
-              {userBots.map((bot) => (
-                <option key={bot.id} value={bot.id}>{bot.name}</option>
-              ))}
-            </select>
+        <div className="text-gray-300">
+          <span className="font-semibold">Players:</span> {gameState?.raceInfo.totalPlayers || 0}
+        </div>
+        {(gameState?.spectatorCount ?? 0) > 0 && (
+          <div className="text-purple-400">
+            <span className="font-semibold">Spectators:</span> {gameState?.spectatorCount}
+          </div>
+        )}
+        {!isSpectator && (
+          <>
+            <div className="text-gray-300">
+              <span className="font-semibold">Track Seed:</span> {seed}
+              <button
+                onClick={() => navigator.clipboard.writeText(seed.toString())}
+                className="ml-2 px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600"
+                title="Copy seed to clipboard"
+              >
+                Copy
+              </button>
+            </div>
             <button
-              onClick={handleSubmitBot}
-              disabled={!selectedBotId || gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'finished'}
-              className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+              onClick={handleShareSession}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              title="Copy shareable session link to clipboard"
             >
-              Submit Bot
+              Share Session
             </button>
-          </div>
+            {!raceStarted && (
+              <button
+                onClick={handleStartRace}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                Start Race
+              </button>
+            )}
+            {userBots.length > 0 && (
+              <div className="flex gap-2 items-center">
+                <select
+                  value={selectedBotId || ''}
+                  onChange={(e) => setSelectedBotId(Number(e.target.value))}
+                  className="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600"
+                >
+                  {userBots.map((bot) => (
+                    <option key={bot.id} value={bot.id}>{bot.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleSubmitBot}
+                  disabled={!selectedBotId || gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'finished'}
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+                >
+                  Submit Bot
+                </button>
+              </div>
+            )}
+            {botSubmissionStatus && (
+              <div className={`px-4 py-2 rounded ${
+                botSubmissionStatus.startsWith('✓')
+                  ? 'bg-green-600/20 text-green-400 border border-green-600'
+                  : botSubmissionStatus.startsWith('✗')
+                  ? 'bg-red-600/20 text-red-400 border border-red-600'
+                  : 'bg-blue-600/20 text-blue-400 border border-blue-600'
+              }`}>
+                {botSubmissionStatus}
+              </div>
+            )}
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              title="Generate new random track"
+            >
+              New Track
+            </button>
+          </>
         )}
-        {botSubmissionStatus && (
-          <div className={`px-4 py-2 rounded ${
-            botSubmissionStatus.startsWith('✓')
-              ? 'bg-green-600/20 text-green-400 border border-green-600'
-              : botSubmissionStatus.startsWith('✗')
-              ? 'bg-red-600/20 text-red-400 border border-red-600'
-              : 'bg-blue-600/20 text-blue-400 border border-blue-600'
-          }`}>
-            {botSubmissionStatus}
-          </div>
-        )}
-        <button
-          onClick={() => window.location.reload()}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          title="Generate new random track"
-        >
-          🔄 New Track
-        </button>
       </div>
 
-      <p className="text-gray-300 mb-4">
-        Physics running on server at 60Hz. Click "👥 Share Session" to race with friends in real-time! Multiple humans, bots, or both can race together.
-      </p>
+      {/* Spectator Camera Controls */}
+      {isSpectator && gameState && playerList.length > 0 && (
+        <div className="mb-4 flex gap-4 items-center flex-wrap bg-gray-800 p-3 rounded-lg">
+          <span className="font-semibold text-gray-300">Camera:</span>
+          <button
+            onClick={() => setCameraMode('follow')}
+            className={`px-3 py-1 rounded ${cameraMode === 'follow' ? 'bg-purple-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+          >
+            Follow Car
+          </button>
+          <button
+            onClick={() => setCameraMode('free')}
+            className={`px-3 py-1 rounded ${cameraMode === 'free' ? 'bg-purple-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+          >
+            Free Camera
+          </button>
+          {cameraMode === 'follow' && (
+            <>
+              <span className="text-gray-400">|</span>
+              <span className="text-gray-300 text-sm">Following:</span>
+              <select
+                value={followTarget || ''}
+                onChange={(e) => setFollowTarget(e.target.value || null)}
+                className="px-3 py-1 bg-gray-700 text-white rounded border border-gray-600 text-sm"
+              >
+                <option value="">Race Leader</option>
+                {playerList.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.isBot ? ' (Bot)' : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  const idx = playerList.findIndex(p => p.id === followTarget);
+                  const prevIdx = idx <= 0 ? playerList.length - 1 : idx - 1;
+                  setFollowTarget(playerList[prevIdx].id);
+                }}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                title="Previous car"
+              >
+                Prev
+              </button>
+              <button
+                onClick={() => {
+                  const idx = playerList.findIndex(p => p.id === followTarget);
+                  const nextIdx = idx >= playerList.length - 1 ? 0 : idx + 1;
+                  setFollowTarget(playerList[nextIdx].id);
+                }}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+                title="Next car"
+              >
+                Next
+              </button>
+            </>
+          )}
+          {cameraMode === 'free' && (
+            <span className="text-gray-400 text-sm">Use WASD to pan camera</span>
+          )}
+        </div>
+      )}
+
+      {!isSpectator && (
+        <p className="text-gray-300 mb-4">
+          Physics running on server at 60Hz. Click "Share Session" to race with friends in real-time!
+        </p>
+      )}
 
       <div className="mt-8 bg-gray-800 p-4 rounded-lg relative">
-        <GameCanvas gameState={gameState} width={800} height={600} />
+        <GameCanvas
+          gameState={gameState}
+          width={800}
+          height={600}
+          isSpectator={isSpectator}
+          spectatorTarget={followTarget}
+          cameraMode={cameraMode}
+        />
         {gameState && <RaceHUD raceInfo={gameState.raceInfo} car={gameState.cars[0]} />}
         {gameState && (
           <CountdownOverlay
@@ -408,64 +516,51 @@ export default function MultiplayerRace() {
         )}
       </div>
 
-      {/* Keyboard Input Display */}
-      <div className="mt-4 bg-gray-800 p-4 rounded-lg">
-        <h3 className="text-lg font-semibold mb-3">Keyboard Controls (Sent to Server)</h3>
-        <p className="text-sm text-gray-400 mb-3">
-          {gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'waiting' ? (
-            <span className="text-yellow-400 font-semibold">🔒 Controls locked during countdown</span>
-          ) : (
-            <span>Inputs sent only when changed (optimized network traffic)</span>
-          )}
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div className={`p-3 rounded text-center transition-colors ${
-            inputState.accelerate ? 'bg-green-600' : 'bg-gray-700'
-          }`}>
-            <div className="font-semibold">Accelerate</div>
-            <div className="text-sm text-gray-300">W / ↑</div>
-          </div>
-          <div className={`p-3 rounded text-center transition-colors ${
-            inputState.brake ? 'bg-red-600' : 'bg-gray-700'
-          }`}>
-            <div className="font-semibold">Brake</div>
-            <div className="text-sm text-gray-300">S / ↓</div>
-          </div>
-          <div className={`p-3 rounded text-center transition-colors ${
-            inputState.turnLeft ? 'bg-blue-600' : 'bg-gray-700'
-          }`}>
-            <div className="font-semibold">Turn Left</div>
-            <div className="text-sm text-gray-300">A / ←</div>
-          </div>
-          <div className={`p-3 rounded text-center transition-colors ${
-            inputState.turnRight ? 'bg-blue-600' : 'bg-gray-700'
-          }`}>
-            <div className="font-semibold">Turn Right</div>
-            <div className="text-sm text-gray-300">D / →</div>
-          </div>
-          <div className={`p-3 rounded text-center transition-colors ${
-            inputState.nitro ? 'bg-purple-600' : 'bg-gray-700'
-          }`}>
-            <div className="font-semibold">Nitro</div>
-            <div className="text-sm text-gray-300">Space</div>
+      {/* Keyboard Input Display (hidden for spectators) */}
+      {!isSpectator && (
+        <div className="mt-4 bg-gray-800 p-4 rounded-lg">
+          <h3 className="text-lg font-semibold mb-3">Keyboard Controls (Sent to Server)</h3>
+          <p className="text-sm text-gray-400 mb-3">
+            {gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'waiting' ? (
+              <span className="text-yellow-400 font-semibold">Controls locked during countdown</span>
+            ) : (
+              <span>Inputs sent only when changed (optimized network traffic)</span>
+            )}
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className={`p-3 rounded text-center transition-colors ${
+              inputState.accelerate ? 'bg-green-600' : 'bg-gray-700'
+            }`}>
+              <div className="font-semibold">Accelerate</div>
+              <div className="text-sm text-gray-300">W / Up</div>
+            </div>
+            <div className={`p-3 rounded text-center transition-colors ${
+              inputState.brake ? 'bg-red-600' : 'bg-gray-700'
+            }`}>
+              <div className="font-semibold">Brake</div>
+              <div className="text-sm text-gray-300">S / Down</div>
+            </div>
+            <div className={`p-3 rounded text-center transition-colors ${
+              inputState.turnLeft ? 'bg-blue-600' : 'bg-gray-700'
+            }`}>
+              <div className="font-semibold">Turn Left</div>
+              <div className="text-sm text-gray-300">A / Left</div>
+            </div>
+            <div className={`p-3 rounded text-center transition-colors ${
+              inputState.turnRight ? 'bg-blue-600' : 'bg-gray-700'
+            }`}>
+              <div className="font-semibold">Turn Right</div>
+              <div className="text-sm text-gray-300">D / Right</div>
+            </div>
+            <div className={`p-3 rounded text-center transition-colors ${
+              inputState.nitro ? 'bg-purple-600' : 'bg-gray-700'
+            }`}>
+              <div className="font-semibold">Nitro</div>
+              <div className="text-sm text-gray-300">Space</div>
+            </div>
           </div>
         </div>
-      </div>
-
-      <div className="mt-4 text-sm text-gray-400">
-        <p>Server-Authoritative Features:</p>
-        <ul className="list-disc list-inside ml-4 mt-2">
-          <li>Server runs physics at fixed 60Hz tick rate</li>
-          <li>Client sends inputs only when changed (optimized network traffic)</li>
-          <li>Server broadcasts state updates at 60 FPS</li>
-          <li>Obstacle collision handled server-side</li>
-          <li>Checkpoint progress tracked server-side</li>
-          <li><strong>Real-time multiplayer!</strong> Click "👥 Share Session" to race with friends</li>
-          <li>Human vs human, bot vs bot, or mixed races supported</li>
-          <li>Random track generation - each reload creates a new track!</li>
-          <li>Reproducible tracks - use <code>?seed=123</code> in URL to load a specific track</li>
-        </ul>
-      </div>
+      )}
     </div>
   );
 }
