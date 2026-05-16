@@ -13,5 +13,6 @@ Public API:
 
 from app.agents.intent import Intent
 from app.agents.llm_strategist import LLMStrategist
+from app.agents.observation import format_observation
 
-__all__ = ["Intent", "LLMStrategist"]
+__all__ = ["Intent", "LLMStrategist", "format_observation"]
