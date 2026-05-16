@@ -196,6 +196,67 @@ class LobbyManager:
 
         return True
 
+    def spectate_lobby(
+        self,
+        lobby_id: str,
+        player_id: str,
+        username: Optional[str] = None
+    ) -> bool:
+        """
+        Add spectator to lobby.
+
+        Spectators can join lobbies in WAITING, STARTING, or RACING status.
+        They receive state broadcasts but cannot send inputs or affect the race.
+
+        Args:
+            lobby_id: Lobby to spectate
+            player_id: Spectator identifier
+            username: Optional display name
+
+        Returns:
+            True if successful, False otherwise
+        """
+        lobby = self._lobbies.get(lobby_id)
+        if not lobby:
+            logger.warning(f"Spectator {player_id} tried to spectate non-existent lobby {lobby_id}")
+            return False
+
+        if lobby.status in (LobbyStatus.FINISHED, LobbyStatus.DISBANDED):
+            logger.warning(f"Spectator {player_id} tried to spectate lobby {lobby_id} in status {lobby.status}")
+            return False
+
+        if player_id in lobby.spectators:
+            logger.debug(f"Spectator {player_id} already spectating lobby {lobby_id}")
+            return True  # Already spectating
+
+        lobby.spectators[player_id] = LobbyMember(
+            player_id=player_id,
+            username=username
+        )
+        logger.info(f"Spectator {player_id} joined lobby {lobby_id} ({lobby.get_spectator_count()} spectators)")
+        return True
+
+    def remove_spectator(self, lobby_id: str, player_id: str) -> bool:
+        """
+        Remove spectator from lobby.
+
+        Does not trigger host transfer or lobby disband.
+
+        Args:
+            lobby_id: Lobby to leave
+            player_id: Spectator identifier
+
+        Returns:
+            True if successful, False otherwise
+        """
+        lobby = self._lobbies.get(lobby_id)
+        if not lobby or player_id not in lobby.spectators:
+            return False
+
+        del lobby.spectators[player_id]
+        logger.info(f"Spectator {player_id} left lobby {lobby_id} ({lobby.get_spectator_count()} spectators remaining)")
+        return True
+
     def add_bot_to_lobby(
         self,
         lobby_id: str,

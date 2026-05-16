@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Lobby, LobbyMember } from '../services';
 import { useUsername } from '../hooks/useUsername';
 import { getWsBaseUrl } from '../config';
@@ -18,6 +18,8 @@ interface LobbyState extends Lobby {}
 const LobbyWaitingRoom: React.FC = () => {
   const { lobbyId } = useParams<{ lobbyId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const isSpectator = searchParams.get('spectate') === 'true';
   const { username, loading: usernameLoading } = useUsername();
 
   const [lobbyState, setLobbyState] = useState<LobbyState | null>(null);
@@ -39,6 +41,9 @@ const LobbyWaitingRoom: React.FC = () => {
     let wsUrl = `${WS_BASE_URL}/game/ws?lobby_id=${lobbyId}`;
     if (username) {
       wsUrl += `&player_id=${encodeURIComponent(username)}`;
+    }
+    if (isSpectator) {
+      wsUrl += '&spectate=true';
     }
 
     const ws = new WebSocket(wsUrl);
@@ -67,12 +72,19 @@ const LobbyWaitingRoom: React.FC = () => {
           setIsHost(message.data.player_id === message.data.lobby.host_player_id);
           break;
 
+        case 'spectator_joined':
+          // Successfully joined as spectator
+          setPlayerId(message.data.player_id);
+          setLobbyState(message.data.lobby);
+          setIsHost(false);
+          break;
+
         case 'lobby_state':
           // Full lobby state update
           const state: LobbyState = message.data;
           setLobbyState(state);
-          // Update isHost if needed
-          if (playerId) {
+          // Update isHost if needed (spectators are never host)
+          if (playerId && !isSpectator) {
             setIsHost(playerId === state.host_player_id);
           }
           break;
@@ -85,13 +97,14 @@ const LobbyWaitingRoom: React.FC = () => {
           // Member left - we'll get a lobby_state update
           break;
 
-        case 'race_starting':
+        case 'race_starting': {
           // Race is starting - navigate to race page with session and player ID
           const gameSessionId = message.data.game_session_id;
-          // Use username directly (it's what we used to join the lobby)
           const playerIdParam = username ? `&player_id=${encodeURIComponent(username)}` : '';
-          navigate(`/race?session_id=${gameSessionId}${playerIdParam}`);
+          const spectateParam = isSpectator ? '&spectate=true' : '';
+          navigate(`/race?session_id=${gameSessionId}${playerIdParam}${spectateParam}`);
           break;
+        }
 
         case 'error':
           setError(message.data.message);
@@ -123,7 +136,7 @@ const LobbyWaitingRoom: React.FC = () => {
         ws.close();
       }
     };
-  }, [lobbyId, navigate, username, usernameLoading]);
+  }, [lobbyId, navigate, username, usernameLoading, isSpectator]);
 
   const handleStartRace = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -165,12 +178,19 @@ const LobbyWaitingRoom: React.FC = () => {
         {/* Header */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
-            <h1 className="text-4xl font-bold">{lobbyState.name}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold">{lobbyState.name}</h1>
+              {isSpectator && (
+                <span className="px-3 py-1 bg-purple-700 text-purple-200 text-sm rounded font-semibold">
+                  SPECTATING
+                </span>
+              )}
+            </div>
             <button
               onClick={handleLeaveLobby}
               className="px-4 py-2 bg-red-700 hover:bg-red-600 rounded"
             >
-              Leave Lobby
+              {isSpectator ? 'Stop Spectating' : 'Leave Lobby'}
             </button>
           </div>
 
@@ -195,6 +215,14 @@ const LobbyWaitingRoom: React.FC = () => {
             <span>
               Players: {lobbyState.members.length} / {lobbyState.settings.max_players}
             </span>
+            {(lobbyState.spectator_count > 0) && (
+              <>
+                <span>•</span>
+                <span className="text-purple-400">
+                  Spectators: {lobbyState.spectator_count}
+                </span>
+              </>
+            )}
             <span>•</span>
             <span>Difficulty: {lobbyState.settings.track_difficulty}</span>
             {isHost && (
@@ -252,8 +280,14 @@ const LobbyWaitingRoom: React.FC = () => {
           </div>
         </div>
 
-        {/* Host Controls */}
-        {isHost ? (
+        {/* Host Controls / Waiting Messages */}
+        {isSpectator ? (
+          <div className="text-center py-12">
+            <p className="text-xl text-purple-400">
+              Spectating - waiting for race to start...
+            </p>
+          </div>
+        ) : isHost ? (
           <div className="mb-8">
             <h2 className="text-2xl font-bold mb-4">Host Controls</h2>
             <div className="bg-gray-800 border border-gray-700 rounded-lg p-6">

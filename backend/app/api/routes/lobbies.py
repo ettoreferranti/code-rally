@@ -68,6 +68,7 @@ class LobbyResponse(BaseModel):
     status: str
     created_at: float
     game_session_id: Optional[str] = None
+    spectator_count: int = 0
 
 
 class LobbyListItemResponse(BaseModel):
@@ -80,6 +81,8 @@ class LobbyListItemResponse(BaseModel):
     max_players: int
     status: str
     created_at: float
+    spectator_count: int = 0
+    game_session_id: Optional[str] = None
 
 
 # ===== Helper Functions =====
@@ -109,7 +112,8 @@ def _lobby_to_response(lobby) -> LobbyResponse:
         ],
         status=lobby.status.value,
         created_at=lobby.created_at,
-        game_session_id=lobby.game_session_id
+        game_session_id=lobby.game_session_id,
+        spectator_count=lobby.get_spectator_count()
     )
 
 
@@ -123,7 +127,9 @@ def _lobby_to_list_item(lobby) -> LobbyListItemResponse:
         member_count=lobby.get_member_count(),
         max_players=lobby.settings.max_players,
         status=lobby.status.value,
-        created_at=lobby.created_at
+        created_at=lobby.created_at,
+        spectator_count=lobby.get_spectator_count(),
+        game_session_id=lobby.game_session_id
     )
 
 

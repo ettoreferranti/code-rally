@@ -11,12 +11,18 @@ interface GameCanvasProps {
   gameState: GameState | null;
   width?: number;
   height?: number;
+  isSpectator?: boolean;
+  spectatorTarget?: string | null;
+  cameraMode?: 'follow' | 'free';
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
   gameState,
   width = 800,
-  height = 600
+  height = 600,
+  isSpectator = false,
+  spectatorTarget = null,
+  cameraMode = 'follow',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<Camera>(new Camera());
@@ -24,6 +30,36 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [fps, setFps] = useState<number>(0);
   const frameCountRef = useRef<number>(0);
   const lastFpsUpdateRef = useRef<number>(Date.now());
+
+  // Free camera state for spectators
+  const freeCamKeysRef = useRef<{ w: boolean; a: boolean; s: boolean; d: boolean }>({
+    w: false, a: false, s: false, d: false,
+  });
+
+  // Free camera keyboard handler
+  useEffect(() => {
+    if (!isSpectator || cameraMode !== 'free') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (key in freeCamKeysRef.current) {
+        freeCamKeysRef.current[key as keyof typeof freeCamKeysRef.current] = true;
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (key in freeCamKeysRef.current) {
+        freeCamKeysRef.current[key as keyof typeof freeCamKeysRef.current] = false;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isSpectator, cameraMode]);
 
   // Buffer incoming game states for interpolation
   useEffect(() => {
@@ -69,10 +105,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const interpolatedState = stateBufferRef.current.getInterpolatedState(currentTime);
 
       if (interpolatedState) {
-        // Update camera to follow current player's car
-        if (interpolatedState.cars.length > 0) {
-          const playerCar = interpolatedState.cars.find(car => car.isCurrentPlayer) || interpolatedState.cars[0];
-          camera.follow(playerCar.position.x, playerCar.position.y, 0.1);
+        // Update camera position
+        if (isSpectator && cameraMode === 'free') {
+          // Free camera - pan with WASD
+          const speed = 5;
+          const keys = freeCamKeysRef.current;
+          if (keys.w) camera.y -= speed;
+          if (keys.s) camera.y += speed;
+          if (keys.a) camera.x -= speed;
+          if (keys.d) camera.x += speed;
+        } else if (interpolatedState.cars.length > 0) {
+          // Follow mode - determine which car to follow
+          let targetCar;
+          if (isSpectator && spectatorTarget) {
+            // Follow specific spectator target
+            targetCar = interpolatedState.cars.find(car => car.playerId === spectatorTarget);
+          }
+          if (!targetCar) {
+            // Default: follow current player, or first car (race leader) for spectators
+            targetCar = interpolatedState.cars.find(car => car.isCurrentPlayer) || interpolatedState.cars[0];
+          }
+          camera.follow(targetCar.position.x, targetCar.position.y, 0.1);
         }
 
         // Apply camera transform
@@ -113,7 +166,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       cancelAnimationFrame(animationFrameId);
       stateBufferRef.current.clear(); // Clear buffer on unmount
     };
-  }, [gameState, width, height]);
+  }, [gameState, width, height, isSpectator, spectatorTarget, cameraMode]);
 
   return (
     <div className="relative">
