@@ -29,6 +29,7 @@ Three design decisions worth highlighting before changing this file:
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Optional
@@ -36,8 +37,13 @@ from typing import Optional
 from app.agents.intent import Intent
 from app.bot_runtime.types import BotGameState
 
+logger = logging.getLogger(__name__)
+
 
 _MS_TO_KMH = 3.6
+# Diagnostic logging cadence: emit one info line per ~N controller ticks.
+# At the engine's 20Hz bot tick rate this is ~one line every 500 ms per car.
+_DIAGNOSTIC_LOG_EVERY = 10
 
 # Hard ceilings independent of the Intent schema's own bounds.
 # Defensive only — the schema already clamps, but if someone constructs
@@ -71,6 +77,8 @@ class Controller:
         self._base_steer_deadband_deg = base_steer_deadband_deg
         self._base_speed_deadband_kmh = base_speed_deadband_kmh
         self._last_intent: Optional[Intent] = None
+        # Tick counter for throttled diagnostic logging (#162).
+        self._tick_count: int = 0
 
     def compute(self, intent: Optional[Intent], state: BotGameState) -> ControlInputs:
         """Compute the next-tick control flags. Never raises."""
@@ -80,18 +88,59 @@ class Controller:
 
         if effective is None:
             # No Intent has ever arrived — cruise slowly toward the next checkpoint.
-            return self._compute_from_target(
+            inputs = self._compute_from_target(
                 target_speed_kmh=self._fallback_speed_kmh,
                 racing_line_offset_m=0.0,
                 aggression=0.0,
                 state=state,
             )
+            self._maybe_log(state, self._fallback_speed_kmh, 0.0, 0.0, inputs, fallback=True)
+            return inputs
 
-        return self._compute_from_target(
-            target_speed_kmh=_clamp(effective.target_speed_kmh, 0.0, _MAX_TARGET_SPEED_KMH),
-            racing_line_offset_m=_clamp(effective.racing_line_offset_m, -_MAX_OFFSET_M, _MAX_OFFSET_M),
-            aggression=_clamp(effective.aggression, 0.0, 1.0),
+        target = _clamp(effective.target_speed_kmh, 0.0, _MAX_TARGET_SPEED_KMH)
+        offset = _clamp(effective.racing_line_offset_m, -_MAX_OFFSET_M, _MAX_OFFSET_M)
+        aggression = _clamp(effective.aggression, 0.0, 1.0)
+        inputs = self._compute_from_target(
+            target_speed_kmh=target,
+            racing_line_offset_m=offset,
+            aggression=aggression,
             state=state,
+        )
+        self._maybe_log(state, target, offset, aggression, inputs, fallback=False)
+        return inputs
+
+    def _maybe_log(
+        self,
+        state: BotGameState,
+        target_kmh: float,
+        offset_m: float,
+        aggression: float,
+        inputs: ControlInputs,
+        fallback: bool,
+    ) -> None:
+        """Diagnostic logger for #162. Fires once per ~500 ms per controller."""
+        self._tick_count += 1
+        if self._tick_count % _DIAGNOSTIC_LOG_EVERY != 0:
+            return
+        current_kmh = state.car.speed * _MS_TO_KMH
+        steer = "L" if inputs.turn_left else ("R" if inputs.turn_right else "-")
+        logger.info(
+            "controller@(%6.1f,%6.1f) heading=%+5.1f deg | target=%5.1f curr=%5.1f delta=%+6.1f km/h "
+            "| offset=%+4.1f m agg=%.2f | accel=%d brake=%d steer=%s | surface=%s off_track=%s%s",
+            state.car.position[0],
+            state.car.position[1],
+            math.degrees(state.car.heading),
+            target_kmh,
+            current_kmh,
+            target_kmh - current_kmh,
+            offset_m,
+            aggression,
+            int(inputs.accelerate),
+            int(inputs.brake),
+            steer,
+            state.car.current_surface,
+            "Y" if state.car.off_track else "N",
+            " [fallback]" if fallback else "",
         )
 
     # ----- internals -----

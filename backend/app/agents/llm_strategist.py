@@ -120,6 +120,19 @@ class LLMStrategist:
         if intent is not None:
             self._latest_intent = intent
             self._latest_intent_ts = time.time()
+            logger.info(
+                "strategist intent: target=%.0f km/h, offset=%+.1f m, aggression=%.2f",
+                intent.target_speed_kmh,
+                intent.racing_line_offset_m,
+                intent.aggression,
+            )
+        else:
+            # Surface parse failures too — useful when the model emits malformed
+            # JSON consistently (one of the candidate causes for #162).
+            logger.info(
+                "strategist intent: PARSE FAILURE (raw=%r)",
+                raw[:200] if raw else raw,
+            )
         return intent
 
     async def start(self) -> None:
