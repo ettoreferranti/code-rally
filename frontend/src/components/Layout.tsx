@@ -1,4 +1,5 @@
 import { Link, Outlet } from 'react-router-dom'
+import { UserMenu } from './UserMenu'
 
 export default function Layout() {
   return (
@@ -12,32 +13,37 @@ export default function Layout() {
                 Top-down 2D racing game with programmable bots
               </p>
             </div>
-            <nav className="flex gap-4">
-              <Link
-                to="/"
-                className="px-4 py-2 rounded hover:bg-white/20 transition"
-              >
-                Home
-              </Link>
-              <Link
-                to="/practice"
-                className="px-4 py-2 rounded hover:bg-white/20 transition"
-              >
-                Practice
-              </Link>
-              <Link
-                to="/multiplayer"
-                className="px-4 py-2 rounded hover:bg-white/20 transition"
-              >
-                Multiplayer
-              </Link>
-              <Link
-                to="/editor"
-                className="px-4 py-2 rounded hover:bg-white/20 transition"
-              >
-                Editor
-              </Link>
-            </nav>
+            <div className="flex items-center gap-2">
+              <nav className="flex gap-4">
+                <Link
+                  to="/"
+                  className="px-4 py-2 rounded hover:bg-white/20 transition"
+                >
+                  Home
+                </Link>
+                <Link
+                  to="/practice"
+                  className="px-4 py-2 rounded hover:bg-white/20 transition"
+                >
+                  Practice
+                </Link>
+                <Link
+                  to="/multiplayer"
+                  className="px-4 py-2 rounded hover:bg-white/20 transition"
+                >
+                  Multiplayer
+                </Link>
+                <Link
+                  to="/editor"
+                  className="px-4 py-2 rounded hover:bg-white/20 transition"
+                >
+                  Editor
+                </Link>
+              </nav>
+              <div className="ml-3 pl-3 border-l border-white/20">
+                <UserMenu />
+              </div>
+            </div>
           </div>
         </div>
       </header>
