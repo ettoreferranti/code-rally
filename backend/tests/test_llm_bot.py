@@ -276,6 +276,57 @@ class TestEngineLLMIntegration:
         await engine.stop_loop()
 
     @pytest.mark.asyncio
+    async def test_strategist_stops_when_race_transitions_to_finished(self, engine):
+        """When the race ends, strategist tasks must stop on their own so we
+        don't keep burning MLX cycles between race-end and session teardown
+        (#165). The auto-stop must fire before stop_loop is called.
+        """
+        from app.core.engine import RaceStatus
+
+        engine.add_llm_player(
+            "llm_player",
+            generate_fn=_make_constant_generate(),
+            strategist_kwargs={"tick_interval_s": 0.01},
+        )
+        await engine.start_agents()
+        player = engine.state.players["llm_player"]
+        task = player.llm_bot._strategist._task
+        assert task is not None
+        assert engine._agents_stopped is False
+
+        # Force the race into FINISHED before we start the loop so the very
+        # first tick observes the transition and stops agents.
+        engine.state.race_info.status = RaceStatus.FINISHED
+
+        await engine.start_loop()
+        # Let the game loop run a few iterations.
+        await asyncio.sleep(0.05)
+
+        # The auto-stop should have fired without needing stop_loop.
+        assert engine._agents_stopped is True
+        assert task.done()
+
+        # Cleanup is still safe (stop_loop calls _stop_agents idempotently).
+        await engine.stop_loop()
+
+    @pytest.mark.asyncio
+    async def test_stop_loop_after_finish_is_idempotent(self, engine):
+        """stop_loop must work cleanly even when agents already stopped (#165)."""
+        engine.add_llm_player(
+            "llm_player",
+            generate_fn=_make_constant_generate(),
+            strategist_kwargs={"tick_interval_s": 0.01},
+        )
+        await engine.start_agents()
+
+        # Mimic the auto-trigger having already stopped agents.
+        await engine._stop_agents()
+        assert engine._agents_stopped is True
+
+        # No exception, no hang.
+        await engine.stop_loop()
+
+    @pytest.mark.asyncio
     async def test_stop_loop_cancels_strategist_task(self, engine):
         """Acceptance criterion: strategist lifecycle bound to race lifecycle —
         no leaked tasks after the engine stops.

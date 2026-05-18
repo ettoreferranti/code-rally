@@ -122,6 +122,10 @@ class GameEngine:
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        # Tracks whether LLM strategist tasks have already been cancelled —
+        # used to make `_stop_agents` idempotent and to gate the auto-stop
+        # on race finish (#165).
+        self._agents_stopped: bool = False
 
     def add_player(self, player_id: str) -> PlayerState:
         """
@@ -254,6 +258,23 @@ class GameEngine:
         for player in self.state.players.values():
             if player.llm_bot is not None:
                 await player.llm_bot.start()
+        # Reset the auto-stop guard so the next race-finish will trigger
+        # the agent-stop transition.
+        self._agents_stopped = False
+
+    async def _stop_agents(self) -> None:
+        """Cancel all LLM strategist tasks. Idempotent.
+
+        Called automatically when the race transitions to FINISHED (#165),
+        and again by ``stop_loop`` on session teardown. The repeat is a
+        no-op because LLMStrategist.stop() guards against double-stop.
+        """
+        if self._agents_stopped:
+            return
+        for player in self.state.players.values():
+            if player.llm_bot is not None:
+                await player.llm_bot.stop()
+        self._agents_stopped = True
 
     def update_player_input(self, player_id: str, input_data: PlayerInput) -> None:
         """
@@ -317,10 +338,9 @@ class GameEngine:
     async def stop_loop(self) -> None:
         """Stop the game loop and cancel any LLM agent tasks."""
         # Cancel agents before tearing down the loop so their background
-        # tasks can't outlive the engine.
-        for player in self.state.players.values():
-            if player.llm_bot is not None:
-                await player.llm_bot.stop()
+        # tasks can't outlive the engine. _stop_agents is idempotent so
+        # this is safe even if the race-finish auto-trigger already fired.
+        await self._stop_agents()
 
         self._running = False
         if self._task:
@@ -344,6 +364,15 @@ class GameEngine:
 
             # Run physics tick
             self._tick()
+
+            # Auto-stop LLM strategist tasks once the race is over so we
+            # don't keep burning MLX cycles between race-end and session
+            # teardown (#165). Stays a no-op for non-LLM races.
+            if (
+                self.state.race_info.status == RaceStatus.FINISHED
+                and not self._agents_stopped
+            ):
+                await self._stop_agents()
 
     def _tick(self) -> None:
         """Process one game tick (1/60th of a second)."""
