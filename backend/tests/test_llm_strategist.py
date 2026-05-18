@@ -121,6 +121,27 @@ class TestParseIntent:
         assert intent is not None
         assert intent.target_speed_kmh == 80
 
+    def test_rejects_intent_with_target_below_racing_floor(self):
+        """Observed during #162 diagnosis: Qwen2.5-1.5B on a wet stage
+        converges to `target_speed_kmh=0`, parking the car. We reject
+        intents below a racing floor so the strategist holds the last
+        good intent and the bot keeps racing."""
+        # 0 means "stop" — the original failure mode.
+        assert _parse_intent(
+            '{"target_speed_kmh": 0, "racing_line_offset_m": 0, "aggression": 0}'
+        ) is None
+        # 15 km/h is also too slow to race (below the controller's own fallback).
+        assert _parse_intent(
+            '{"target_speed_kmh": 15, "racing_line_offset_m": 0, "aggression": 0.5}'
+        ) is None
+
+    def test_accepts_intent_at_racing_floor(self):
+        intent = _parse_intent(
+            '{"target_speed_kmh": 30, "racing_line_offset_m": 0, "aggression": 0.5}'
+        )
+        assert intent is not None
+        assert intent.target_speed_kmh == 30
+
 
 # ===== build_prompt =====
 
