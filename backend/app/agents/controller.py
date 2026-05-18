@@ -4,7 +4,7 @@ Consumes the latest :class:`Intent` produced by the strategist (#152)
 and the current :class:`BotGameState` and emits discrete control flags
 matching the engine's :class:`PlayerInput` shape.
 
-Two design decisions worth highlighting before changing this file:
+Three design decisions worth highlighting before changing this file:
 
 1. **Discrete output.** The engine accepts bool flags, not continuous
    steer/throttle/brake. Pure-pursuit gives a continuous steering
@@ -18,10 +18,13 @@ Two design decisions worth highlighting before changing this file:
    slow cruise along the next checkpoint direction. The controller
    must never raise into the per-tick path.
 
-The lookahead point for steering is the *next checkpoint*, optionally
-shifted perpendicular to the car→checkpoint direction by
-``racing_line_offset_m`` (positive = right of track direction, matching
-the bearing convention used elsewhere in the agent code).
+3. **Coordinate convention: y-DOWN (#164).** The engine, physics, and
+   renderer all treat positive y as "down on screen". Increasing the
+   car heading rotates the car clockwise visually, which matches the
+   "right turn" semantics. So a target at **+y** relative to a +x-facing
+   driver is to the driver's RIGHT, and bearing > 0 means "turn right".
+   This affects both the bearing computation and the rotation used to
+   shift the lookahead by ``racing_line_offset_m``.
 """
 
 from __future__ import annotations
@@ -127,8 +130,10 @@ class Controller:
             return "straight"
 
         absolute_angle = math.atan2(dy, dx)
-        # Bearing positive = right of heading (matches observation.py convention).
-        bearing_deg = math.degrees(state.car.heading - absolute_angle)
+        # Engine uses y-DOWN coordinates (#164): heading increases CW visually,
+        # so "right of driver" corresponds to +y in engine coords. Positive
+        # bearing therefore means target is right of heading.
+        bearing_deg = math.degrees(absolute_angle - state.car.heading)
         bearing_deg = _wrap_signed_deg(bearing_deg)
 
         # Aggression tightens the deadband: higher aggression = quicker to turn.
@@ -182,9 +187,12 @@ class Controller:
             return cx, cy
         ux, uy = dx / norm, dy / norm
 
-        # Right perpendicular in y-up math: rotate (ux, uy) by -90° clockwise.
-        # rot_-90(u) = (uy, -ux). Positive offset shifts to the right of track dir.
-        px, py = uy, -ux
+        # Right perpendicular in y-DOWN coords (#164): rotating a track-
+        # direction vector CW on screen yields the "right of track" side.
+        # In math terms that's a CCW rotation since canvas y is flipped:
+        #     rot_+90(ux, uy) = (-uy, ux)
+        # Positive offset shifts the lookahead to the right of track direction.
+        px, py = -uy, ux
         return (cx + racing_line_offset_m * px, cy + racing_line_offset_m * py)
 
 

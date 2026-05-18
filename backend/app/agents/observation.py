@@ -20,6 +20,8 @@ Design notes (worth knowing before changing this file):
 - **Bearings are degrees, signed, relative to the car's heading.**
   Positive = right (clockwise), negative = left, range (-180, 180].
   This matches how humans describe relative direction ("turn 30° right").
+  Engine coords are y-DOWN (#164): a target at +y relative to a +x-facing
+  driver is "below on screen" = right of driver = positive bearing.
 
 - **Speeds are km/h.** Distances are metres. These are the units a
   driver would speak in.
@@ -132,16 +134,18 @@ def _polar_relative_to(
     """Return (distance_m, bearing_deg) of (target_x, target_y) seen from the car.
 
     Bearing is signed degrees, positive = right of heading (clockwise),
-    chosen to match driver intuition ("turn right" = positive). Because
-    the game uses standard math y-up coordinates (BotCarState heading
-    0 = +x, π/2 = +y), atan2 produces a counter-clockwise angle from
-    +x, so we negate the relative angle to flip the rotation direction.
+    chosen to match driver intuition ("turn right" = positive). The
+    engine uses y-DOWN coordinates (heading 0 = +x = right on screen,
+    increasing heading rotates the car CW visually) — see #164 — so a
+    target at +y from a +x-facing driver is to the right and gets a
+    positive bearing.
     """
     dx = target_x - car_x
     dy = target_y - car_y
     dist = math.hypot(dx, dy)
     absolute_angle = math.atan2(dy, dx)
-    relative_rad = car_heading_rad - absolute_angle  # flip: CCW math -> CW bearing
+    # In y-down, CW-from-heading bearing = absolute_angle - heading.
+    relative_rad = absolute_angle - car_heading_rad
     bearing_deg = _wrap_signed_deg(math.degrees(relative_rad))
     return dist, bearing_deg
 

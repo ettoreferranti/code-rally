@@ -118,15 +118,14 @@ class TestBearingConvention:
         assert bearing == pytest.approx(0.0, abs=1e-6)
 
     def test_target_to_the_right_is_positive_bearing(self):
-        # Car at origin facing +x. In y-up math, "right of +x" is -y
-        # (below the x-axis). atan2(-1, 0) = -90° → after the sign flip
-        # the formatter must report +90°.
-        _, bearing = _polar_relative_to(0, 0, 0.0, 0.0, -50.0)
+        # Engine uses y-DOWN coords (#164): "right of a +x-facing driver"
+        # is +y in engine coords. Bearing should be +90.
+        _, bearing = _polar_relative_to(0, 0, 0.0, 0.0, 50.0)
         assert bearing == pytest.approx(90.0, abs=1e-6)
 
     def test_target_to_the_left_is_negative_bearing(self):
-        # Target on +y axis (north in y-up). Car facing +x sees this as left.
-        _, bearing = _polar_relative_to(0, 0, 0.0, 0.0, 50.0)
+        # In y-down, target at -y is above on screen = left of driver.
+        _, bearing = _polar_relative_to(0, 0, 0.0, 0.0, -50.0)
         assert bearing == pytest.approx(-90.0, abs=1e-6)
 
     def test_target_behind_is_180(self):
@@ -269,14 +268,16 @@ class TestHeadingRotatesBearings:
             car=_car(position=(0.0, 0.0), heading=0.0),
             track=_track(checkpoints=checkpoints, next_checkpoint=0),
         )
-        # Car now faces +y (left/north). The checkpoint at +x is to its right.
+        # Car now faces +y. In y-down (#164) that's "facing down on screen".
+        # The checkpoint at +x is to the RIGHT on screen = to the driver's
+        # LEFT (since the driver is facing down). Expect -90.
         state_b = _state(
             car=_car(position=(0.0, 0.0), heading=math.pi / 2),
             track=_track(checkpoints=checkpoints, next_checkpoint=0),
         )
 
         assert "bearing=0 deg" in format_observation(state_a)
-        assert "bearing=90 deg" in format_observation(state_b)
+        assert "bearing=-90 deg" in format_observation(state_b)
 
 
 # ===== Pure / deterministic =====

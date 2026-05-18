@@ -98,30 +98,16 @@ class TestSteering:
         assert not out.turn_left
         assert not out.turn_right
 
-    def test_checkpoint_to_the_left_steers_left(self):
-        # Car facing +x, checkpoint at (0, 100) -> in y-up math that's "above";
-        # bearing convention says +y is to the LEFT of a +x-facing driver.
-        ctrl = Controller()
-        state = _state(
-            car=_car(position=(0.0, 0.0), heading=0.0),
-            checkpoints=[(0.0, 100.0)],
-        )
-        out = ctrl.compute(_intent(), state)
-        assert out.turn_left and not out.turn_right
-
-    def test_checkpoint_to_the_right_steers_right(self):
-        ctrl = Controller()
-        state = _state(
-            car=_car(position=(0.0, 0.0), heading=0.0),
-            checkpoints=[(0.0, -100.0)],
-        )
-        out = ctrl.compute(_intent(), state)
-        assert out.turn_right and not out.turn_left
+    # NOTE: "checkpoint left" / "checkpoint right" cases moved into
+    # `TestSteeringYDownConvention` below (#164) — the prior versions
+    # were written assuming y-up math and contradicted the engine's
+    # actual y-down convention.
 
     def test_racing_line_offset_shifts_lookahead_across_track(self):
         # Both car and checkpoint on the +x axis; with zero offset, no turn.
-        # A positive offset shifts the lookahead to the right of track
-        # direction (which is +x), i.e. toward -y → the car should turn right.
+        # In y-down, a positive racing_line_offset shifts the lookahead to
+        # the right of track direction = +y in engine coords = "below on
+        # screen" = right of a +x-facing driver, so the car should turn right.
         ctrl_a = Controller()
         ctrl_b = Controller()
         state = _state(
@@ -152,6 +138,45 @@ class TestSteering:
         )
         out = ctrl.compute(_intent(), state)
         assert not out.turn_left and not out.turn_right
+
+
+class TestSteeringYDownConvention:
+    """Engine reality: this game uses a y-DOWN coordinate system.
+
+    - Renderer applies `ctx.rotate(heading)` to canvas, where positive
+      angles rotate clockwise visually because canvas y is down.
+    - Engine maps human "right arrow" to `turn_direction=+1` which sets
+      `heading += turn_rate*dt`. Increasing heading therefore rotates
+      the car visually to the **right** (CW on screen). For this to be
+      consistent with driver intuition, "right of a +x-facing driver"
+      must mean **+y** in engine coords (downward on screen), and
+      "left" means **-y**.
+
+    The controller's bearing convention must match: target at +y from a
+    +x-facing driver → positive bearing → "turn right". Tests below pin
+    that down (and would fail under a y-up assumption, see #164).
+    """
+
+    def test_checkpoint_below_screen_steers_right(self):
+        # Car at origin facing +x; checkpoint at (0, +100), which in this
+        # engine is "below" on screen = "right of driver". Expect right turn.
+        ctrl = Controller()
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0),
+            checkpoints=[(0.0, 100.0)],
+        )
+        out = ctrl.compute(_intent(), state)
+        assert out.turn_right and not out.turn_left
+
+    def test_checkpoint_above_screen_steers_left(self):
+        # Checkpoint at (0, -100) = above on screen = left of driver.
+        ctrl = Controller()
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0),
+            checkpoints=[(0.0, -100.0)],
+        )
+        out = ctrl.compute(_intent(), state)
+        assert out.turn_left and not out.turn_right
 
 
 # ===== Speed control =====
