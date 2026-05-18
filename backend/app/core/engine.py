@@ -18,6 +18,8 @@ from app.core.physics import CarPhysics, CarState, Vector2
 from app.core.track import Track
 from app.core.bot_manager import BotManager, BotError
 from app.config import get_settings
+from app.agents.llm_bot import LLMBot
+from app.agents.llm_strategist import GenerateFn
 
 
 class RaceStatus(Enum):
@@ -67,10 +69,15 @@ class PlayerState:
 
     # Bot-specific fields
     is_bot: bool = False  # Whether this player is controlled by a bot
-    bot_instance: Optional[Any] = None  # Bot instance (if is_bot=True)
+    bot_instance: Optional[Any] = None  # Python sandbox bot instance (if any)
     bot_code: Optional[str] = None  # Bot source code for persistence
     bot_class_name: Optional[str] = None  # Bot class name
     bot_error: Optional[str] = None  # Error message if bot failed
+    # LLM driver: when set, this player is driven by an LLM strategist +
+    # deterministic controller instead of (or alongside, mutually exclusive
+    # with) the Python sandbox bot. The engine dispatches the LLM path in
+    # _update_bot_inputs and binds the strategist task to race lifecycle.
+    llm_bot: Optional[LLMBot] = None
 
     # Car properties
     weight: float = 60.0  # Car weight (affects collision momentum transfer)
@@ -188,6 +195,61 @@ class GameEngine:
 
         return player
 
+    def add_llm_player(
+        self,
+        player_id: str,
+        generate_fn: Optional[GenerateFn] = None,
+        strategist_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> PlayerState:
+        """
+        Add an LLM-controlled player to the game.
+
+        Args:
+            player_id: Unique identifier for the player
+            generate_fn: Async text-generation callable. If None, the
+                production MLX runtime singleton is used. Tests inject a
+                stub so the suite does not depend on MLX.
+            strategist_kwargs: Optional overrides for LLMStrategist
+                (tick_interval_s, timeout_s).
+
+        Returns:
+            The created PlayerState
+
+        Raises:
+            BotError: If MLX is required (no generate_fn passed) but the
+                optional MLX dependency is not installed.
+        """
+        player = self.add_player(player_id)
+
+        if generate_fn is None:
+            try:
+                from app.agents import mlx_runtime
+                generate_fn = mlx_runtime.get_mlx_generate_fn()
+            except RuntimeError as exc:
+                player.is_bot = True
+                player.bot_error = str(exc)
+                player.dnf = True
+                raise BotError(
+                    f"Cannot create LLM driver: MLX runtime unavailable ({exc})"
+                ) from exc
+
+        player.is_bot = True
+        player.llm_bot = LLMBot(
+            generate_fn=generate_fn,
+            strategist_kwargs=strategist_kwargs,
+        )
+        return player
+
+    async def start_agents(self) -> None:
+        """Spawn background tasks for all LLM-driven players.
+
+        Call after start_race(). Safe to call multiple times; LLMStrategist
+        guards against double-start.
+        """
+        for player in self.state.players.values():
+            if player.llm_bot is not None:
+                await player.llm_bot.start()
+
     def update_player_input(self, player_id: str, input_data: PlayerInput) -> None:
         """
         Update a player's input state.
@@ -248,7 +310,13 @@ class GameEngine:
         self._task = asyncio.create_task(self._game_loop())
 
     async def stop_loop(self) -> None:
-        """Stop the game loop."""
+        """Stop the game loop and cancel any LLM agent tasks."""
+        # Cancel agents before tearing down the loop so their background
+        # tasks can't outlive the engine.
+        for player in self.state.players.values():
+            if player.llm_bot is not None:
+                await player.llm_bot.stop()
+
         self._running = False
         if self._task:
             await self._task
@@ -345,6 +413,21 @@ class GameEngine:
 
             # Skip bots that have already errored or finished
             if player.bot_error is not None or player.is_finished or player.dnf:
+                continue
+
+            # LLM driver path: sync, never blocks, never raises.
+            if player.llm_bot is not None:
+                bot_state = self.bot_manager._create_bot_game_state(
+                    self.state, player.player_id, self.state.track
+                )
+                ctrl = player.llm_bot.get_inputs(bot_state)
+                player.input = PlayerInput(
+                    accelerate=ctrl.accelerate,
+                    brake=ctrl.brake,
+                    turn_left=ctrl.turn_left,
+                    turn_right=ctrl.turn_right,
+                    nitro=ctrl.nitro,
+                )
                 continue
 
             # Execute bot's on_tick() method

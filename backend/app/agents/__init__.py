@@ -13,6 +13,7 @@ Public API:
 
 from app.agents.controller import Controller, ControlInputs
 from app.agents.intent import Intent
+from app.agents.llm_bot import LLMBot
 from app.agents.llm_strategist import LLMStrategist
 from app.agents.observation import format_observation
 
@@ -20,6 +21,7 @@ __all__ = [
     "Controller",
     "ControlInputs",
     "Intent",
+    "LLMBot",
     "LLMStrategist",
     "format_observation",
 ]
