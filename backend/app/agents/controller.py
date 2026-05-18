@@ -118,13 +118,21 @@ class Controller:
         inputs: ControlInputs,
         fallback: bool,
     ) -> None:
-        """Diagnostic logger for #162. Fires once per ~500 ms per controller."""
+        """Diagnostic logger for #162. Fires once per ~500 ms per controller.
+
+        Logs at DEBUG level so the line stays out of the default INFO console
+        but is one log-level flip away when diagnosing a future regression.
+        Enable with `logging.getLogger('app.agents.controller').setLevel('DEBUG')`
+        or by lowering the uvicorn log level.
+        """
         self._tick_count += 1
         if self._tick_count % _DIAGNOSTIC_LOG_EVERY != 0:
             return
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
         current_kmh = state.car.speed * _MS_TO_KMH
         steer = "L" if inputs.turn_left else ("R" if inputs.turn_right else "-")
-        logger.info(
+        logger.debug(
             "controller@(%6.1f,%6.1f) heading=%+5.1f deg | target=%5.1f curr=%5.1f delta=%+6.1f km/h "
             "| offset=%+4.1f m agg=%.2f | accel=%d brake=%d steer=%s | surface=%s off_track=%s%s",
             state.car.position[0],
