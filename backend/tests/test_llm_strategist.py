@@ -96,6 +96,31 @@ class TestParseIntent:
         raw = '{"target_speed_kmh": 80, "racing_line_offset_m": 0, "aggression": 5}'
         assert _parse_intent(raw) is None
 
+    def test_parses_first_object_when_model_concatenates_outputs(self):
+        """Observed from Qwen2.5-1.5B during #162 diagnosis: the model
+        keeps emitting the same JSON object over and over, often truncated
+        at the end. The parser must take the FIRST complete object.
+        """
+        raw = (
+            '{"target_speed_kmh": 44, "racing_line_offset_m": 0, "aggression": 0.5} '
+            '{"target_speed_kmh": 44, "racing_line_offset_m": 0, "aggression": 0.5} '
+            '{"target_speed_kmh":'
+        )
+        intent = _parse_intent(raw)
+        assert intent is not None
+        assert intent.target_speed_kmh == 44
+        assert intent.racing_line_offset_m == 0
+        assert intent.aggression == 0.5
+
+    def test_parses_first_object_with_trailing_prose(self):
+        raw = (
+            '{"target_speed_kmh": 80, "racing_line_offset_m": 0, "aggression": 0.5}\n'
+            "Note: maintain steady speed through the corner."
+        )
+        intent = _parse_intent(raw)
+        assert intent is not None
+        assert intent.target_speed_kmh == 80
+
 
 # ===== build_prompt =====
 

@@ -166,12 +166,21 @@ def _parse_intent(raw: str) -> Optional[Intent]:
     if not raw:
         return None
 
-    # Find the first {...} block. Models often emit a code fence or a stray
-    # leading token despite the system prompt. We do not attempt brace
-    # balancing for nested JSON because the Intent schema is flat.
+    # Find the FIRST complete {...} block. Models sometimes emit a code
+    # fence, a stray leading token, or — as observed with Qwen2.5-1.5B in
+    # #162 — keep repeating the same object until the token budget runs
+    # out. Taking up to the LAST `}` (the original behaviour) bundles all
+    # the repeats together as one invalid blob; taking the first `}` after
+    # the first `{` gives us the first complete object every time.
+    #
+    # The Intent schema is flat (no nested objects, no `}` inside string
+    # values), so a literal first-`}` scan is safe. If the schema ever
+    # gains nested objects, switch to a brace-balanced scan instead.
     start = raw.find("{")
-    end = raw.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    if start == -1:
+        return None
+    end = raw.find("}", start)
+    if end == -1:
         return None
     candidate = raw[start : end + 1]
 
