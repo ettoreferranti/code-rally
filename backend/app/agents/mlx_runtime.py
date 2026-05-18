@@ -49,18 +49,28 @@ class MLXRuntime:
         self._model, self._tokenizer = load(model_path)
         self._generate = generate
         self._max_tokens = max_tokens
+        # Serialize concurrent generate() callers: Metal command-buffer
+        # encoding against a single loaded model is not thread-safe.
+        # Without this, two LLM bots sharing a cached runtime collide
+        # mid-race with a Metal assertion (#163).
+        self._gen_lock = asyncio.Lock()
         logger.info("MLX model loaded")
 
     async def generate(self, prompt: str) -> str:
-        """Async wrapper around the synchronous mlx-lm generate call."""
-        return await asyncio.to_thread(
-            self._generate,
-            self._model,
-            self._tokenizer,
-            prompt=prompt,
-            max_tokens=self._max_tokens,
-            verbose=False,
-        )
+        """Async wrapper around the synchronous mlx-lm generate call.
+
+        Holds a per-runtime lock so two concurrent callers queue rather
+        than racing into Metal at the same time.
+        """
+        async with self._gen_lock:
+            return await asyncio.to_thread(
+                self._generate,
+                self._model,
+                self._tokenizer,
+                prompt=prompt,
+                max_tokens=self._max_tokens,
+                verbose=False,
+            )
 
 
 def get_runtime(model_path: Optional[str] = None) -> MLXRuntime:
