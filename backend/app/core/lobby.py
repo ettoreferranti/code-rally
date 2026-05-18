@@ -34,10 +34,16 @@ class LobbyMember:
     """Individual member in a lobby."""
     player_id: str  # Unique player identifier
     username: Optional[str] = None  # Display name (if logged in)
+    # Driver kind discriminator. "is_bot" stays True for both bot kinds for
+    # back-compat; "driver_kind" carries the precise type the frontend roster
+    # and the race-start dispatcher need.
+    driver_kind: str = "human"  # "human" | "python_bot" | "llm_bot"
     is_bot: bool = False
-    bot_id: Optional[int] = None  # Database bot ID if is_bot=True
+    bot_id: Optional[int] = None  # Database bot ID for python_bot members
     bot_code: Optional[str] = None
     bot_class_name: Optional[str] = None
+    # LLM-bot config. None → server default (mlx_runtime.DEFAULT_MODEL_PATH).
+    llm_model_path: Optional[str] = None
     ready: bool = False  # Ready to start (future feature)
     connection_time: float = field(default_factory=time.time)
 

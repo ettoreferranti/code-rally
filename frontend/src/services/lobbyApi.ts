@@ -18,9 +18,13 @@ export interface LobbySettings {
 export interface LobbyMember {
   player_id: string;
   username: string | null;
+  // "human" | "python_bot" | "llm_bot". Optional for back-compat with older
+  // server payloads that only carry is_bot.
+  driver_kind?: string;
   is_bot: boolean;
   bot_id: number | null;
   ready: boolean;
+  llm_model_path?: string | null;
 }
 
 export interface LobbyListItem {

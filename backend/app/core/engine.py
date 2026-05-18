@@ -200,6 +200,7 @@ class GameEngine:
         player_id: str,
         generate_fn: Optional[GenerateFn] = None,
         strategist_kwargs: Optional[Dict[str, Any]] = None,
+        model_path: Optional[str] = None,
     ) -> PlayerState:
         """
         Add an LLM-controlled player to the game.
@@ -207,24 +208,28 @@ class GameEngine:
         Args:
             player_id: Unique identifier for the player
             generate_fn: Async text-generation callable. If None, the
-                production MLX runtime singleton is used. Tests inject a
-                stub so the suite does not depend on MLX.
+                production MLX runtime is used (cached per model_path).
+                Tests inject a stub so the suite does not depend on MLX.
             strategist_kwargs: Optional overrides for LLMStrategist
                 (tick_interval_s, timeout_s).
+            model_path: Optional HuggingFace path / local path for the MLX
+                model. Defaults to mlx_runtime.DEFAULT_MODEL_PATH. Ignored
+                when generate_fn is provided.
 
         Returns:
             The created PlayerState
 
         Raises:
             BotError: If MLX is required (no generate_fn passed) but the
-                optional MLX dependency is not installed.
+                optional MLX dependency is not installed, or the model
+                fails to load.
         """
         player = self.add_player(player_id)
 
         if generate_fn is None:
             try:
                 from app.agents import mlx_runtime
-                generate_fn = mlx_runtime.get_mlx_generate_fn()
+                generate_fn = mlx_runtime.get_mlx_generate_fn(model_path)
             except RuntimeError as exc:
                 player.is_bot = True
                 player.bot_error = str(exc)

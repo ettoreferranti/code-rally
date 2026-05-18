@@ -295,17 +295,11 @@ class TestEngineLLMIntegration:
         assert task_before.done()
 
     @pytest.mark.asyncio
-    async def test_two_llm_players_share_mlx_runtime_singleton(self, engine, monkeypatch):
-        """Acceptance criterion: two LLM cars in one race share the MLX runtime.
-
-        We stub MLXRuntime.__init__ so the singleton creation succeeds without
-        loading a real model, then assert both players resolve to the same
-        runtime instance.
-        """
+    async def test_two_llm_players_same_model_share_runtime(self, engine, monkeypatch):
+        """Acceptance criterion: two LLM cars on the same model share one runtime."""
         from app.agents import mlx_runtime
 
-        # Reset singleton between tests.
-        mlx_runtime.MLXRuntime._instance = None
+        mlx_runtime.MLXRuntime._runtimes = {}
 
         construct_calls = 0
 
@@ -323,13 +317,40 @@ class TestEngineLLMIntegration:
         engine.add_llm_player("llm_one")
         engine.add_llm_player("llm_two")
 
-        # Both bots should use the same singleton runtime — i.e. __init__
-        # was called exactly once across both add_llm_player calls.
+        # Both bots use the default model → exactly one runtime constructed.
         assert construct_calls == 1
-        assert mlx_runtime.MLXRuntime._instance is not None
+        assert len(mlx_runtime.MLXRuntime._runtimes) == 1
 
-        # Cleanup.
-        mlx_runtime.MLXRuntime._instance = None
+        mlx_runtime.MLXRuntime._runtimes = {}
+
+    @pytest.mark.asyncio
+    async def test_two_llm_players_different_models_use_separate_runtimes(self, engine, monkeypatch):
+        """Different model_paths load their own runtimes, cached per path."""
+        from app.agents import mlx_runtime
+
+        mlx_runtime.MLXRuntime._runtimes = {}
+
+        construct_calls = 0
+
+        def stub_init(self, model_path=mlx_runtime.DEFAULT_MODEL_PATH, max_tokens=64):
+            nonlocal construct_calls
+            construct_calls += 1
+            self._max_tokens = max_tokens
+
+        async def stub_generate(self, prompt: str) -> str:
+            return VALID_INTENT_JSON
+
+        monkeypatch.setattr(mlx_runtime.MLXRuntime, "__init__", stub_init)
+        monkeypatch.setattr(mlx_runtime.MLXRuntime, "generate", stub_generate)
+
+        engine.add_llm_player("llm_one", model_path="modelA")
+        engine.add_llm_player("llm_two", model_path="modelB")
+        engine.add_llm_player("llm_three", model_path="modelA")  # cache hit
+
+        assert construct_calls == 2  # one per unique model
+        assert set(mlx_runtime.MLXRuntime._runtimes.keys()) == {"modelA", "modelB"}
+
+        mlx_runtime.MLXRuntime._runtimes = {}
 
     def test_snapshot_omits_agent_intent_for_human_player(self, engine):
         """Non-LLM cars must not carry agent_intent in the WS payload."""
@@ -365,6 +386,72 @@ class TestEngineLLMIntegration:
         assert agent_intent["racing_line_offset_m"] == 1.5
         assert agent_intent["aggression"] == 0.4
         assert agent_intent["ts"] == produced_at
+
+    def test_add_llm_player_propagates_model_path_to_runtime(self, engine, monkeypatch):
+        """The model_path argument routes through to get_mlx_generate_fn."""
+        from app.agents import mlx_runtime
+
+        captured: Dict[str, Any] = {}
+
+        async def stub_generate(_prompt: str) -> str:
+            return VALID_INTENT_JSON
+
+        def fake_get(model_path=None):
+            captured["model_path"] = model_path
+            return stub_generate
+
+        monkeypatch.setattr(mlx_runtime, "get_mlx_generate_fn", fake_get)
+
+        engine.add_llm_player("llm_one", model_path="mlx-community/some-other-model")
+        assert captured["model_path"] == "mlx-community/some-other-model"
+
+    def test_lobby_race_start_dispatches_llm_driver(self, test_track, monkeypatch):
+        """End-to-end-ish: a lobby with an LLM bot starts a race and the
+        engine ends up with an LLM driver carrying the configured model_path.
+
+        Mirrors what `handle_lobby_start_race` does in the WS route, without
+        going through WebSockets.
+        """
+        from app.agents import mlx_runtime
+        from app.core.lobby_manager import LobbyManager
+
+        captured_paths: List[Optional[str]] = []
+
+        async def stub_generate(_prompt: str) -> str:
+            return VALID_INTENT_JSON
+
+        def fake_get(model_path=None):
+            captured_paths.append(model_path)
+            return stub_generate
+
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+        monkeypatch.setattr(mlx_runtime, "get_mlx_generate_fn", fake_get)
+
+        manager = LobbyManager()
+        lobby = manager.create_lobby("Race", "host_player")
+        llm_player_id = manager.add_llm_bot_to_lobby(
+            lobby_id=lobby.lobby_id,
+            model_path="mlx-community/Qwen2.5-7B-Instruct-4bit",
+        )
+        assert llm_player_id is not None
+
+        # Mimic handle_lobby_start_race's dispatch loop using `test_track`
+        # so we don't depend on TrackGenerator settings.
+        engine_local = GameEngine(test_track)
+        for member in manager.get_lobby(lobby.lobby_id).members.values():
+            if member.driver_kind == "llm_bot":
+                engine_local.add_llm_player(
+                    member.player_id, model_path=member.llm_model_path
+                )
+            else:
+                engine_local.add_player(member.player_id)
+
+        # Forwarded the configured model path to MLX runtime resolution.
+        assert captured_paths == ["mlx-community/Qwen2.5-7B-Instruct-4bit"]
+        # Engine ended up with an LLM-driven player.
+        player = engine_local.state.players[llm_player_id]
+        assert player.llm_bot is not None
+        assert player.is_bot is True
 
     def test_add_llm_player_raises_bot_error_when_mlx_unavailable(self, engine, monkeypatch):
         """Acceptance criterion: clear error when MLX is configured but missing."""

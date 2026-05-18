@@ -348,9 +348,11 @@ def serialize_lobby_state(lobby) -> dict:
             {
                 'player_id': member.player_id,
                 'username': member.username,
+                'driver_kind': member.driver_kind,
                 'is_bot': member.is_bot,
                 'bot_id': member.bot_id,
-                'ready': member.ready
+                'ready': member.ready,
+                'llm_model_path': member.llm_model_path,
             }
             for member in lobby.members.values()
         ],
@@ -452,11 +454,22 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
     # Mark this session as coming from a lobby (don't auto-cleanup on player disconnect)
     _lobby_sessions.add(game_session_id)
 
-    # Add all lobby members to game engine
+    # Add all lobby members to game engine, dispatching by driver_kind.
     lobby = lobby_manager.get_lobby(lobby_id)
     for member in lobby.members.values():
-        if member.is_bot:
-            # Add bot player
+        if member.driver_kind == "llm_bot":
+            try:
+                engine.add_llm_player(
+                    member.player_id,
+                    model_path=member.llm_model_path,
+                )
+            except BotError as e:
+                logger.error(f"Failed to add LLM bot {member.player_id} to race: {e}")
+                await websocket.send_json({
+                    'type': 'error',
+                    'data': {'message': f'LLM bot failed to load: {e}'}
+                })
+        elif member.driver_kind == "python_bot" or member.is_bot:
             try:
                 engine.add_bot_player(
                     member.player_id,
@@ -466,11 +479,11 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
             except BotError as e:
                 logger.error(f"Failed to add bot {member.player_id} to race: {e}")
         else:
-            # Add human player
             engine.add_player(member.player_id)
 
-    # Start engine loop
+    # Start engine loop, then spawn any LLM strategist tasks bound to the race.
     await engine.start_loop()
+    await engine.start_agents()
 
     # Don't start broadcaster here - it will be started when first player connects
     # (prevents broadcaster from exiting immediately due to no connections)
@@ -587,6 +600,63 @@ async def handle_add_bot_to_lobby(lobby_id: str, player_id: str, bot_id: int, we
 
     finally:
         db.close()
+
+
+async def handle_add_llm_bot_to_lobby(
+    lobby_id: str,
+    player_id: str,
+    model_path: Optional[str],
+    websocket: WebSocket,
+) -> None:
+    """
+    Handle adding an LLM-driven bot to a lobby (host-only).
+
+    Surfaces MLX-not-installed as a clear error so the host knows to
+    install the optional MLX dependency before adding LLM agents.
+    """
+    lobby_manager = get_lobby_manager()
+    lobby = lobby_manager.get_lobby(lobby_id)
+
+    if lobby is None:
+        await websocket.send_json({
+            'type': 'error',
+            'data': {'message': 'Lobby not found'}
+        })
+        return
+
+    if not lobby.is_host(player_id):
+        await websocket.send_json({
+            'type': 'error',
+            'data': {'message': 'Only the host can add LLM bots'}
+        })
+        return
+
+    llm_player_id = lobby_manager.add_llm_bot_to_lobby(
+        lobby_id=lobby_id,
+        model_path=model_path,
+    )
+    if llm_player_id is None:
+        # Distinguish the MLX-missing case so the UI can show a helpful message.
+        from app.agents import mlx_runtime
+        if not mlx_runtime.is_available():
+            message = (
+                'MLX is not installed on the server. Install '
+                'backend/requirements-agents.txt to enable LLM bots '
+                '(Apple Silicon only).'
+            )
+        else:
+            message = 'Failed to add LLM bot (lobby full or wrong status)'
+        await websocket.send_json({
+            'type': 'error',
+            'data': {'message': message}
+        })
+        return
+
+    lobby = lobby_manager.get_lobby(lobby_id)
+    await broadcast_to_lobby(lobby_id, {
+        'type': 'lobby_state',
+        'data': serialize_lobby_state(lobby)
+    })
 
 
 async def handle_spectate_lobby(lobby_id: str, player_id: str, username: Optional[str], websocket: WebSocket) -> None:
@@ -947,6 +1017,13 @@ async def game_websocket(
                 # Add bot to lobby
                 bot_id = message['data'].get('bot_id')
                 await handle_add_bot_to_lobby(lobby_id, player_id, bot_id, websocket)
+
+            elif message['type'] == 'add_llm_bot_to_lobby':
+                # Add LLM-driven bot to lobby (host only)
+                model_path = (message.get('data') or {}).get('model_path')
+                await handle_add_llm_bot_to_lobby(
+                    lobby_id, player_id, model_path, websocket
+                )
 
             # Game input messages
             elif message['type'] == 'input':

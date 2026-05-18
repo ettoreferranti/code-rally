@@ -27,6 +27,7 @@ const LobbyWaitingRoom: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [llmModelPath, setLlmModelPath] = useState<string>('');
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -151,6 +152,21 @@ const LobbyWaitingRoom: React.FC = () => {
     );
   };
 
+  const handleAddLlmBot = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setError('Not connected to server');
+      return;
+    }
+
+    const trimmed = llmModelPath.trim();
+    wsRef.current.send(
+      JSON.stringify({
+        type: 'add_llm_bot_to_lobby',
+        data: trimmed ? { model_path: trimmed } : {},
+      })
+    );
+  };
+
   const handleLeaveLobby = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'leave_lobby' }));
@@ -269,11 +285,19 @@ const LobbyWaitingRoom: React.FC = () => {
                       HOST
                     </span>
                   )}
-                  {member.is_bot && (
+                  {member.driver_kind === 'llm_bot' ? (
+                    <span
+                      data-testid="llm-bot-badge"
+                      className="px-2 py-1 bg-purple-700 text-purple-200 text-xs rounded"
+                      title={member.llm_model_path || 'default model'}
+                    >
+                      LLM
+                    </span>
+                  ) : member.is_bot ? (
                     <span className="px-2 py-1 bg-blue-700 text-blue-200 text-xs rounded">
                       BOT
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -305,6 +329,28 @@ const LobbyWaitingRoom: React.FC = () => {
                   <span className="font-semibold">Max Players:</span>{' '}
                   {lobbyState.settings.max_players}
                 </p>
+              </div>
+
+              {/* Add LLM Bot — research playground (#157) */}
+              <div className="mb-4 p-3 bg-gray-900 rounded border border-purple-700/40">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    data-testid="llm-model-input"
+                    type="text"
+                    value={llmModelPath}
+                    onChange={(e) => setLlmModelPath(e.target.value)}
+                    placeholder="model path (default: Qwen2.5-1.5B-Instruct-4bit)"
+                    className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm"
+                  />
+                  <button
+                    data-testid="add-llm-bot-button"
+                    onClick={handleAddLlmBot}
+                    disabled={lobbyState.members.length >= lobbyState.settings.max_players}
+                    className="px-4 py-2 bg-purple-700 hover:bg-purple-600 rounded text-sm font-semibold disabled:bg-gray-600 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    Add LLM Bot
+                  </button>
+                </div>
               </div>
 
               {/* Start Race Button */}

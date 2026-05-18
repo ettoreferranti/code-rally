@@ -42,6 +42,12 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
+# Optional: LLM agents (Apple Silicon only)
+# Required only if you want to race against LLM-driven cars.
+# One-time install; the model itself (~1 GB) downloads from HuggingFace
+# on first use and caches in ~/.cache/huggingface/.
+pip install -r requirements-agents.txt
+
 # Frontend setup
 cd ../frontend
 npm install

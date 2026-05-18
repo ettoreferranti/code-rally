@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,15 @@ DEFAULT_MODEL_PATH = os.environ.get(
 
 
 class MLXRuntime:
-    """Lazily-loaded singleton wrapping the mlx-lm model+tokenizer."""
+    """Per-model_path cached runtime wrapping the mlx-lm model+tokenizer.
 
-    _instance: Optional["MLXRuntime"] = None
+    The runtime is loaded once per unique ``model_path`` and kept alive for
+    the lifetime of the process. Multiple LLM bots on the same model share
+    one runtime; different models load independently. Cache hits skip the
+    multi-GB model load.
+    """
+
+    _runtimes: Dict[str, "MLXRuntime"] = {}
 
     def __init__(self, model_path: str = DEFAULT_MODEL_PATH, max_tokens: int = 64) -> None:
         try:
@@ -57,17 +63,24 @@ class MLXRuntime:
         )
 
 
-def get_runtime() -> MLXRuntime:
-    """Return the process-wide MLXRuntime singleton (loads on first call)."""
-    if MLXRuntime._instance is None:
-        MLXRuntime._instance = MLXRuntime()
-    return MLXRuntime._instance
+def get_runtime(model_path: Optional[str] = None) -> MLXRuntime:
+    """Return the cached MLXRuntime for the given model_path.
+
+    First request for a given path loads the model (slow); subsequent
+    requests return the cached instance. ``model_path=None`` resolves to
+    ``DEFAULT_MODEL_PATH`` so existing callers see no behavior change.
+    """
+    path = model_path or DEFAULT_MODEL_PATH
+    cached = MLXRuntime._runtimes.get(path)
+    if cached is None:
+        cached = MLXRuntime(model_path=path)
+        MLXRuntime._runtimes[path] = cached
+    return cached
 
 
-def get_mlx_generate_fn():
-    """Return an async generate_fn suitable for LLMStrategist."""
-    runtime = get_runtime()
-    return runtime.generate
+def get_mlx_generate_fn(model_path: Optional[str] = None):
+    """Return an async generate_fn for the given model_path (default model if None)."""
+    return get_runtime(model_path).generate
 
 
 def is_available() -> bool:

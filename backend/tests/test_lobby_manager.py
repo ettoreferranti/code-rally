@@ -363,6 +363,76 @@ class TestLobbyManager:
         )
         assert result is None  # Already added
 
+    def test_lobby_member_default_driver_kind_is_human(self):
+        """driver_kind defaults to 'human' so existing call-sites stay valid."""
+        member = LobbyMember(player_id="player1")
+        assert member.driver_kind == "human"
+
+    def test_python_bot_added_via_add_bot_marks_driver_kind(self, manager):
+        """add_bot_to_lobby sets driver_kind='python_bot' and keeps is_bot=True."""
+        lobby = manager.create_lobby("Test Lobby", "player1")
+        bot_player_id = manager.add_bot_to_lobby(
+            lobby_id=lobby.lobby_id,
+            bot_id=42,
+            bot_code="class Bot: pass",
+            bot_class_name="Bot",
+            owner_username="Alice",
+        )
+        member = manager.get_lobby(lobby.lobby_id).members[bot_player_id]
+        assert member.driver_kind == "python_bot"
+        assert member.is_bot is True
+
+    def test_add_llm_bot_to_lobby(self, manager, monkeypatch):
+        """add_llm_bot_to_lobby creates a member with driver_kind='llm_bot'."""
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+
+        lobby = manager.create_lobby("Test Lobby", "player1")
+        llm_player_id = manager.add_llm_bot_to_lobby(lobby_id=lobby.lobby_id)
+
+        assert llm_player_id is not None
+        member = manager.get_lobby(lobby.lobby_id).members[llm_player_id]
+        assert member.driver_kind == "llm_bot"
+        assert member.is_bot is True
+        assert member.ready is True  # LLM bots are always ready
+        assert member.llm_model_path is None  # default model
+
+    def test_add_llm_bot_stores_model_path(self, manager, monkeypatch):
+        """A configured model_path is preserved on the member."""
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+
+        lobby = manager.create_lobby("Test Lobby", "player1")
+        llm_player_id = manager.add_llm_bot_to_lobby(
+            lobby_id=lobby.lobby_id,
+            model_path="mlx-community/Qwen2.5-7B-Instruct-4bit",
+        )
+
+        member = manager.get_lobby(lobby.lobby_id).members[llm_player_id]
+        assert member.llm_model_path == "mlx-community/Qwen2.5-7B-Instruct-4bit"
+
+    def test_add_llm_bot_rejected_when_mlx_unavailable(self, manager, monkeypatch):
+        """Eager MLX check refuses the add cleanly when the dependency is missing."""
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: False)
+
+        lobby = manager.create_lobby("Test Lobby", "player1")
+        result = manager.add_llm_bot_to_lobby(lobby_id=lobby.lobby_id)
+
+        assert result is None
+        # Lobby still has only the host.
+        assert len(manager.get_lobby(lobby.lobby_id).members) == 1
+
+    def test_add_llm_bot_rejected_when_lobby_full(self, manager, monkeypatch):
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+
+        settings = LobbySettings(max_players=1)
+        lobby = manager.create_lobby("Test Lobby", "player1", settings)
+
+        result = manager.add_llm_bot_to_lobby(lobby_id=lobby.lobby_id)
+        assert result is None
+
     def test_update_settings_by_host(self, manager):
         """Test host updating lobby settings."""
         lobby = manager.create_lobby("Test Lobby", "player1")
