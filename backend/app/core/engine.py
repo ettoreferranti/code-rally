@@ -1061,30 +1061,49 @@ class GameEngine:
                 'grace_period_remaining': self.state.race_info.grace_period_remaining,
             },
             'players': {
-                player_id: {
-                    'car': {
-                        'position': {'x': player.car.position.x, 'y': player.car.position.y},
-                        'velocity': {'x': player.car.velocity.x, 'y': player.car.velocity.y},
-                        'heading': player.car.heading,
-                        'angular_velocity': player.car.angular_velocity,
-                        'is_drifting': player.car.is_drifting,
-                        'drift_angle': player.car.drift_angle,
-                        'nitro_charges': player.car.nitro_charges,
-                        'nitro_active': player.car.nitro_active,
-                        'nitro_remaining_ticks': player.car.nitro_remaining_ticks,
-                    },
-                    'current_checkpoint': player.current_checkpoint,
-                    'split_times': player.split_times,
-                    'is_finished': player.is_finished,
-                    'finish_time': player.finish_time,
-                    'is_off_track': player.is_off_track,
-                    'position': player.position,
-                    'points': player.points,
-                    'dnf': player.dnf,
-                    'is_bot': player.is_bot,
-                    'bot_name': player_id.split('-')[2] if player.is_bot and '-' in player_id else None,
-                    'bot_error': player.bot_error,
-                }
+                player_id: self._player_snapshot(player_id, player)
                 for player_id, player in self.state.players.items()
             }
         }
+
+    def _player_snapshot(self, player_id: str, player: PlayerState) -> Dict:
+        """Build the per-player payload, including agent_intent when applicable."""
+        payload: Dict[str, Any] = {
+            'car': {
+                'position': {'x': player.car.position.x, 'y': player.car.position.y},
+                'velocity': {'x': player.car.velocity.x, 'y': player.car.velocity.y},
+                'heading': player.car.heading,
+                'angular_velocity': player.car.angular_velocity,
+                'is_drifting': player.car.is_drifting,
+                'drift_angle': player.car.drift_angle,
+                'nitro_charges': player.car.nitro_charges,
+                'nitro_active': player.car.nitro_active,
+                'nitro_remaining_ticks': player.car.nitro_remaining_ticks,
+            },
+            'current_checkpoint': player.current_checkpoint,
+            'split_times': player.split_times,
+            'is_finished': player.is_finished,
+            'finish_time': player.finish_time,
+            'is_off_track': player.is_off_track,
+            'position': player.position,
+            'points': player.points,
+            'dnf': player.dnf,
+            'is_bot': player.is_bot,
+            'bot_name': player_id.split('-')[2] if player.is_bot and '-' in player_id else None,
+            'bot_error': player.bot_error,
+        }
+
+        # agent_intent is only present for LLM-driven cars that have produced
+        # at least one intent. Frontend conditionally renders the thought
+        # bubble on its presence.
+        if player.llm_bot is not None:
+            intent, ts = player.llm_bot.latest_intent_with_ts()
+            if intent is not None and ts is not None:
+                payload['agent_intent'] = {
+                    'target_speed_kmh': intent.target_speed_kmh,
+                    'racing_line_offset_m': intent.racing_line_offset_m,
+                    'aggression': intent.aggression,
+                    'ts': ts,
+                }
+
+        return payload

@@ -3,9 +3,17 @@
  */
 
 import React, { useRef, useEffect, useState } from 'react';
-import type { GameState } from './types';
+import type { AgentIntent, GameState } from './types';
 import { Camera, renderTrack, renderCar, clearCanvas } from './renderer';
 import { StateBuffer } from './StateInterpolation';
+import { AgentThoughtBubble } from '../components/AgentThoughtBubble';
+
+interface BubbleEntry {
+  playerId: string;
+  intent: AgentIntent;
+  x: number;
+  y: number;
+}
 
 interface GameCanvasProps {
   gameState: GameState | null;
@@ -28,6 +36,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const cameraRef = useRef<Camera>(new Camera());
   const stateBufferRef = useRef<StateBuffer>(new StateBuffer());
   const [fps, setFps] = useState<number>(0);
+  const [bubbleEntries, setBubbleEntries] = useState<BubbleEntry[]>([]);
   const frameCountRef = useRef<number>(0);
   const lastFpsUpdateRef = useRef<number>(Date.now());
 
@@ -145,6 +154,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           }
           renderCar(ctx, car, color);
         });
+
+        // Compute thought-bubble positions for LLM-driven cars. Done after
+        // the camera transform is set so the screen coords align with what
+        // the canvas just drew. The setState is shallow-diffed to avoid
+        // re-rendering the React tree every frame when nothing changed.
+        const nextBubbles: BubbleEntry[] = [];
+        interpolatedState.cars.forEach((car) => {
+          if (!car.agentIntent || !car.playerId) return;
+          const screen = camera.worldToScreen(car.position.x, car.position.y, canvas);
+          nextBubbles.push({
+            playerId: car.playerId,
+            intent: car.agentIntent,
+            x: screen.x,
+            y: screen.y,
+          });
+        });
+        setBubbleEntries((prev) => bubbleEntriesEqual(prev, nextBubbles) ? prev : nextBubbles);
       } else {
         // No game state - show placeholder
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -175,11 +201,38 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         className="border border-gray-700 rounded"
         style={{ display: 'block' }}
       />
+      {bubbleEntries.map((entry) => (
+        <AgentThoughtBubble
+          key={entry.playerId}
+          intent={entry.intent}
+          position={{ x: entry.x, y: entry.y }}
+        />
+      ))}
       <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white px-3 py-1 rounded text-sm">
         FPS: {fps}
       </div>
     </div>
   );
 };
+
+function bubbleEntriesEqual(a: BubbleEntry[], b: BubbleEntry[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const ax = a[i];
+    const bx = b[i];
+    if (
+      ax.playerId !== bx.playerId ||
+      ax.x !== bx.x ||
+      ax.y !== bx.y ||
+      ax.intent.ts !== bx.intent.ts ||
+      ax.intent.target_speed_kmh !== bx.intent.target_speed_kmh ||
+      ax.intent.aggression !== bx.intent.aggression ||
+      ax.intent.racing_line_offset_m !== bx.intent.racing_line_offset_m
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export default GameCanvas;

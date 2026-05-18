@@ -43,6 +43,13 @@ export interface GameStateMessage {
         is_bot: boolean;  // Whether this player is a bot
         bot_name: string | null;  // Bot name if is_bot is true
         bot_error: string | null;  // Bot error message if any
+        // Present only for LLM-driven cars that have produced an intent.
+        agent_intent?: {
+          target_speed_kmh: number;
+          racing_line_offset_m: number;
+          aggression: number;
+          ts: number;
+        };
       };
     };
   };

@@ -40,6 +40,22 @@ export class Camera {
     ctx.scale(this.zoom, this.zoom);
     ctx.translate(-this.x, -this.y);
   }
+
+  /**
+   * Project a world coordinate to screen-pixel coordinates (canvas-local).
+   * Mirrors `apply()` so DOM overlays positioned on top of the canvas align
+   * with what the canvas draws.
+   */
+  worldToScreen(
+    worldX: number,
+    worldY: number,
+    canvas: HTMLCanvasElement,
+  ): { x: number; y: number } {
+    return {
+      x: canvas.width / 2 + (worldX - this.x) * this.zoom,
+      y: canvas.height / 2 + (worldY - this.y) * this.zoom,
+    };
+  }
 }
 
 /**

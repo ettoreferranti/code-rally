@@ -198,6 +198,54 @@ class TestStrategistTickOnce:
         assert strategist.latest_intent().target_speed_kmh == 50
 
 
+# ===== LLMStrategist intent timestamp (#156) =====
+
+
+class TestStrategistIntentTimestamp:
+    """latest_intent_with_ts() returns (intent, ts) so consumers can detect stale intents."""
+
+    @pytest.mark.asyncio
+    async def test_returns_none_pair_before_any_intent(self):
+        strategist = LLMStrategist(_make_fake_generate(["{}"]))
+        intent, ts = strategist.latest_intent_with_ts()
+        assert intent is None
+        assert ts is None
+
+    @pytest.mark.asyncio
+    async def test_records_timestamp_when_intent_stored(self):
+        import time as _time
+
+        good = '{"target_speed_kmh": 90, "racing_line_offset_m": 0, "aggression": 0.5}'
+        strategist = LLMStrategist(_make_fake_generate([good]))
+        strategist.set_observation("obs")
+
+        before = _time.time()
+        await strategist.tick_once()
+        after = _time.time()
+
+        intent, ts = strategist.latest_intent_with_ts()
+        assert intent is not None
+        assert ts is not None
+        assert before <= ts <= after
+
+    @pytest.mark.asyncio
+    async def test_preserves_previous_ts_on_parse_failure(self):
+        good = '{"target_speed_kmh": 60, "racing_line_offset_m": 0, "aggression": 0.3}'
+        bad = "garbage"
+        strategist = LLMStrategist(_make_fake_generate([good, bad]))
+        strategist.set_observation("obs")
+
+        await strategist.tick_once()
+        _, ts_first = strategist.latest_intent_with_ts()
+        assert ts_first is not None
+
+        await strategist.tick_once()  # fails to parse
+        intent, ts_second = strategist.latest_intent_with_ts()
+        # ts unchanged because the previous good intent is still latest
+        assert intent.target_speed_kmh == 60
+        assert ts_second == ts_first
+
+
 # ===== LLMStrategist start/stop lifecycle =====
 
 

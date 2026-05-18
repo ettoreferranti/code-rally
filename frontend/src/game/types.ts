@@ -59,6 +59,13 @@ export interface Track {
   obstacles: Obstacle[];  // Off-road obstacles
 }
 
+export interface AgentIntent {
+  target_speed_kmh: number;
+  racing_line_offset_m: number;
+  aggression: number;  // 0..1
+  ts: number;  // Server Unix epoch seconds when the intent was produced
+}
+
 export interface CarState {
   position: Vector2;
   velocity: Vector2;
@@ -75,6 +82,9 @@ export interface CarState {
   playerId?: string;  // Player/bot ID
   isBot?: boolean;  // Whether this is a bot-controlled car
   botName?: string | null;  // Bot name if this is a bot
+  // Latest strategist intent for LLM-driven cars. Absent for humans and
+  // Python bots; absent for LLM cars until their first intent is produced.
+  agentIntent?: AgentIntent;
 }
 
 export interface RaceInfo {

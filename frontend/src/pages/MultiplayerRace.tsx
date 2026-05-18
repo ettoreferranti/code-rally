@@ -136,6 +136,7 @@ export default function MultiplayerRace() {
             playerId: pid,
             isBot: pData.is_bot,
             botName: pData.bot_name,
+            agentIntent: pData.agent_intent,
           })),
           tick: state.tick,
           spectatorCount: (state as any).spectator_count || 0,

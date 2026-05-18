@@ -28,9 +28,10 @@ same set of inputs in a different surface form.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from app.agents.controller import Controller, ControlInputs
+from app.agents.intent import Intent
 from app.agents.llm_strategist import GenerateFn, LLMStrategist
 from app.agents.observation import format_observation
 from app.bot_runtime.types import BotGameState
@@ -65,3 +66,12 @@ class LLMBot:
         """Compute the next-tick control flags. Never raises, never awaits."""
         self._strategist.set_observation(format_observation(state))
         return self._controller.compute(self._strategist.latest_intent(), state)
+
+    def latest_intent_with_ts(self) -> Tuple[Optional[Intent], Optional[float]]:
+        """Pass-through for the strategist's (intent, ts) snapshot.
+
+        Consumed by the engine when assembling the WS game_state payload —
+        if the strategist has produced an intent, the snapshot exposes it
+        for the frontend thought-bubble UI.
+        """
+        return self._strategist.latest_intent_with_ts()

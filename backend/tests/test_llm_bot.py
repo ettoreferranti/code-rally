@@ -331,6 +331,41 @@ class TestEngineLLMIntegration:
         # Cleanup.
         mlx_runtime.MLXRuntime._instance = None
 
+    def test_snapshot_omits_agent_intent_for_human_player(self, engine):
+        """Non-LLM cars must not carry agent_intent in the WS payload."""
+        engine.add_player("human")
+        snapshot = engine.get_state_snapshot()
+        assert "agent_intent" not in snapshot["players"]["human"]
+
+    def test_snapshot_omits_agent_intent_when_no_intent_yet(self, engine):
+        """LLM cars before their first Intent must not emit agent_intent."""
+        engine.add_llm_player("llm_player", generate_fn=_make_constant_generate())
+        snapshot = engine.get_state_snapshot()
+        assert "agent_intent" not in snapshot["players"]["llm_player"]
+
+    def test_snapshot_includes_agent_intent_for_llm_player_with_intent(self, engine):
+        """After a strategist intent is produced, the snapshot exposes the full intent + ts."""
+        import time as _time
+
+        engine.add_llm_player("llm_player", generate_fn=_make_constant_generate())
+        player = engine.state.players["llm_player"]
+        # Simulate the strategist storing an intent at a known time.
+        player.llm_bot._strategist._latest_intent = Intent(
+            target_speed_kmh=85.0,
+            racing_line_offset_m=1.5,
+            aggression=0.4,
+        )
+        produced_at = _time.time()
+        player.llm_bot._strategist._latest_intent_ts = produced_at
+
+        snapshot = engine.get_state_snapshot()
+        agent_intent = snapshot["players"]["llm_player"].get("agent_intent")
+        assert agent_intent is not None
+        assert agent_intent["target_speed_kmh"] == 85.0
+        assert agent_intent["racing_line_offset_m"] == 1.5
+        assert agent_intent["aggression"] == 0.4
+        assert agent_intent["ts"] == produced_at
+
     def test_add_llm_player_raises_bot_error_when_mlx_unavailable(self, engine, monkeypatch):
         """Acceptance criterion: clear error when MLX is configured but missing."""
         from app.agents import mlx_runtime

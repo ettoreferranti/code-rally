@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Awaitable, Callable, Optional
+import time
+from typing import Awaitable, Callable, Optional, Tuple
 
 from pydantic import ValidationError
 
@@ -70,6 +71,9 @@ class LLMStrategist:
         self._timeout_s = timeout_s
         self._latest_observation: Optional[str] = None
         self._latest_intent: Optional[Intent] = None
+        # Server-side Unix timestamp of when `_latest_intent` was produced.
+        # Read by consumers (e.g. WebSocket payload) to detect stale intents.
+        self._latest_intent_ts: Optional[float] = None
         self._task: Optional[asyncio.Task] = None
 
     def set_observation(self, observation: str) -> None:
@@ -79,6 +83,14 @@ class LLMStrategist:
     def latest_intent(self) -> Optional[Intent]:
         """Return the most recently parsed Intent, or None if none yet."""
         return self._latest_intent
+
+    def latest_intent_with_ts(self) -> Tuple[Optional[Intent], Optional[float]]:
+        """Return (intent, server-timestamp) — both None if no intent yet.
+
+        The timestamp is captured when the intent was stored, so consumers
+        can compute staleness (e.g. fade a UI element when intent age > 2s).
+        """
+        return self._latest_intent, self._latest_intent_ts
 
     async def tick_once(self) -> Optional[Intent]:
         """Run a single generate+parse cycle.
@@ -107,6 +119,7 @@ class LLMStrategist:
         intent = _parse_intent(raw)
         if intent is not None:
             self._latest_intent = intent
+            self._latest_intent_ts = time.time()
         return intent
 
     async def start(self) -> None:
