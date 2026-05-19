@@ -138,51 +138,74 @@ const LobbyBrowser: React.FC = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {lobbies.map((lobby) => (
-              <div
-                key={lobby.lobby_id}
-                className="bg-gray-800 border border-gray-700 rounded-lg p-6 hover:border-blue-500 transition-colors"
-              >
-                <h3 className="text-xl font-bold mb-2">{lobby.name}</h3>
-                <div className="space-y-1 text-gray-300 mb-4">
-                  <p>
-                    Players: {lobby.member_count} / {lobby.max_players}
-                  </p>
-                  <p className="text-sm">
-                    Status:{' '}
-                    <span className={lobby.status === 'racing' ? 'text-green-400 font-semibold' : ''}>
-                      {lobby.status === 'racing' ? 'In Race' : lobby.status}
-                    </span>
-                  </p>
-                  {lobby.spectator_count > 0 && (
-                    <p className="text-sm text-gray-400">
-                      Spectators: {lobby.spectator_count}
+            {lobbies.map((lobby) => {
+              const isOwnLobby = !!username && lobby.host_player_id === username;
+              const isFull = lobby.member_count >= lobby.max_players;
+              return (
+                <div
+                  key={lobby.lobby_id}
+                  className={`bg-gray-800 border rounded-lg p-6 transition-colors ${
+                    isOwnLobby
+                      ? 'border-yellow-600/60 hover:border-yellow-500'
+                      : 'border-gray-700 hover:border-blue-500'
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-2 gap-2">
+                    <h3 className="text-xl font-bold flex-1 min-w-0 truncate">{lobby.name}</h3>
+                    {isOwnLobby && (
+                      <span
+                        data-testid="your-lobby-badge"
+                        className="px-2 py-0.5 bg-yellow-700 text-yellow-100 text-xs rounded font-semibold"
+                      >
+                        YOUR LOBBY
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1 text-gray-300 mb-4">
+                    <p className="text-sm">
+                      Hosted by <span className="font-semibold">{lobby.host_player_id}</span>
                     </p>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  {lobby.status === 'waiting' && (
+                    <p>
+                      Players: {lobby.member_count} / {lobby.max_players}
+                    </p>
+                    <p className="text-sm">
+                      Status:{' '}
+                      <span className={lobby.status === 'racing' ? 'text-green-400 font-semibold' : ''}>
+                        {lobby.status === 'racing' ? 'In Race' : lobby.status}
+                      </span>
+                    </p>
+                    {lobby.spectator_count > 0 && (
+                      <p className="text-sm text-gray-400">
+                        Spectators: {lobby.spectator_count}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    {lobby.status === 'waiting' && (
+                      <button
+                        onClick={() => handleJoinLobby(lobby.lobby_id)}
+                        disabled={!isOwnLobby && isFull}
+                        className={`flex-1 py-2 rounded font-semibold ${
+                          isOwnLobby
+                            ? 'bg-yellow-700 hover:bg-yellow-600'
+                            : isFull
+                            ? 'bg-gray-600 cursor-not-allowed'
+                            : 'bg-green-600 hover:bg-green-500'
+                        }`}
+                      >
+                        {isOwnLobby ? 'Resume' : isFull ? 'Full' : 'Join'}
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleJoinLobby(lobby.lobby_id)}
-                      disabled={lobby.member_count >= lobby.max_players}
-                      className={`flex-1 py-2 rounded font-semibold ${
-                        lobby.member_count >= lobby.max_players
-                          ? 'bg-gray-600 cursor-not-allowed'
-                          : 'bg-green-600 hover:bg-green-500'
-                      }`}
+                      onClick={() => handleSpectateLobby(lobby)}
+                      className={`${lobby.status === 'racing' ? 'flex-1' : ''} py-2 px-4 rounded font-semibold bg-purple-600 hover:bg-purple-500`}
                     >
-                      {lobby.member_count >= lobby.max_players ? 'Full' : 'Join'}
+                      Spectate
                     </button>
-                  )}
-                  <button
-                    onClick={() => handleSpectateLobby(lobby)}
-                    className={`${lobby.status === 'racing' ? 'flex-1' : ''} py-2 px-4 rounded font-semibold bg-purple-600 hover:bg-purple-500`}
-                  >
-                    Spectate
-                  </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
