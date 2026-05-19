@@ -1,12 +1,16 @@
 # Rally Stage Migration Plan
 
+> **Status**: HISTORICAL — this migration is complete. The document is
+> kept as a record of the design rationale behind switching from
+> looped circuits to point-to-point rally stages. The system today
+> uses the post-migration design described below; the "before" sections
+> describe a state that no longer exists in the codebase.
+
 ## Overview
 
 This document outlines the migration from circular lap-based racing to point-to-point rally stages in CodeRally. This is a foundational change that affects track generation, race logic, and the bot API.
 
-**Status**: Approved for implementation
-**Priority**: HIGH - Must complete before M2 milestone
-**Impact**: Moderate (Milestone 1 in progress, minimal existing code)
+**Status**: ✅ Shipped — see `core/track.py` for the rally stage generator.
 
 ---
 

@@ -1,5 +1,14 @@
 # CodeRally Requirements Specification
 
+> **Status**: This document is the original requirements spec — the
+> "north star" for what CodeRally aspires to be. Some sections describe
+> features that are fully shipped (physics, stages, multiplayer
+> lobbies, Python + LLM bot programming); others describe features
+> that are still aspirational (championship mode, garage / car
+> upgrades, leaderboards, persistent profiles). For the system as it
+> currently ships see `architecture.md` and `bot-api.md` in this
+> folder.
+
 ## Project Vision
 
 CodeRally is a top-down 2D rally racing game that combines classic point-to-point rally stages with programmable AI. Players can race using keyboard controls or write Python code to create autonomous racing bots, competing against other humans and bots on procedurally generated rally stages.

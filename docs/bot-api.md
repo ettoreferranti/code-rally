@@ -2,11 +2,23 @@
 
 ## Introduction
 
-Welcome to CodeRally! This guide will teach you how to write Python code to control your racing car. Your bot competes against human players and other bots on procedurally generated point-to-point rally stages.
+Welcome to CodeRally! This guide covers writing **Python bots** to
+control your racing car. Bots live in your library under the
+[Tinker page](/tinker) and can be added to any lobby alongside
+humans and other bots.
+
+CodeRally also supports a second kind of bot — **LLM bots**, driven
+by a local language model with a custom system prompt — that
+doesn't involve any Python code. See the [LLM Bots](#llm-bots) section
+at the end of this doc for the gist.
+
+Your bot competes against human players and other bots on procedurally
+generated point-to-point rally stages.
 
 ## Bot Structure
 
-Every bot is a Python class with specific methods that the game engine calls.
+Every Python bot is a class with specific methods that the game engine
+calls.
 
 **IMPORTANT**: All bots must inherit from `GuardedBotBase` or `BaseBot` to work in the sandbox environment.
 
@@ -199,9 +211,16 @@ For security, your bot code cannot:
 - Use infinite loops (10ms execution timeout per tick)
 - Use more than 50MB memory
 - Access system functions
-- Use augmented assignment on dictionary items (e.g., `dict[key] += 1`)
+- Use augmented assignment on **attributes** or **dictionary items**
+  (`self.x += 1`, `dict[key] += 1`). RestrictedPython rejects these
+  at compile time.
 
-**Note on Dictionary Updates**: Instead of `self.memory['count'] += 1`, use `self.memory['count'] = self.memory['count'] + 1`.
+Augmented assignment on plain **local variables** (e.g. `count += 1`
+where `count` was assigned earlier in the function) works fine.
+
+**Note on Attribute / Dictionary Updates**: Instead of
+`self.memory['count'] += 1`, use
+`self.memory['count'] = self.memory['count'] + 1`.
 
 Attempting restricted operations will cause your bot to be disqualified from the race.
 
@@ -318,12 +337,14 @@ class CheckpointNavigator(GuardedBotBase):
 
 ## Debugging Tips
 
-In Practice Mode, you can enable debug visualisation:
-
-1. **Vision Rays**: See what your bot "sees"
-2. **Velocity Vector**: Shows current movement direction
-3. **Target Line**: Shows checkpoint navigation
-4. **Console Output**: Use `print()` in your bot (visible in debug panel)
+- Create a **solo lobby** (just you, no other humans) and add your bot
+  to it via the unified Add-to-lobby picker in the waiting room. That's
+  the modern equivalent of the old "Practice Mode" — you can iterate
+  on your bot without anyone else racing alongside.
+- Bots can `print()` freely; output goes to the server console, not
+  the browser. Watch your `uvicorn` log to see what your bot prints.
+- The race HUD shows your bot's car like any other, with its name
+  visible. Watch how it behaves to debug.
 
 ## Tips for Better Bots
 
@@ -452,7 +473,10 @@ class MyBot(BaseBot):
 
 ### Memory Persistence
 
-The `self.memory` dictionary is automatically saved and loaded between races:
+The `self.memory` dictionary is the canonical place to keep
+per-race state. It survives across event callbacks within a single
+race (e.g. counts accumulated in `on_checkpoint` are visible from
+`on_tick`).
 
 ```python
 class LearningBot(BaseBot):
@@ -460,14 +484,57 @@ class LearningBot(BaseBot):
         super().__init__()
         self.name = "Learning Bot"
 
-        # Initialize memory on first run
-        if 'total_races' not in self.memory:
-            self.memory['total_races'] = 0
-            self.memory['best_checkpoint_times'] = []
+        # Initialise memory on first run within this race.
+        if 'tick_count' not in self.memory:
+            self.memory['tick_count'] = 0
 
-    def on_finish(self, finish_time, final_position):
-        self.memory['total_races'] += 1
-        # Memory automatically saved after race
+    def on_tick(self, state):
+        # Augmented assignment on dict items is forbidden by
+        # RestrictedPython — use explicit get/set.
+        self.memory['tick_count'] = self.memory['tick_count'] + 1
+        return BotActions(accelerate=True)
 ```
 
-**Note**: Memory is limited to 100KB and must be JSON-serializable (no classes or functions).
+**Note**: Memory is in-process only — it lives for the lifetime of
+the bot instance (one race). There is currently no database-backed
+state persistence between races; the bot is reinstantiated each time
+it joins a new race. If you want persistent learning, that requires
+adding a `bot_state` storage layer (not currently shipped).
+
+## LLM Bots
+
+In addition to Python bots, CodeRally supports **LLM-driven cars**
+where a local Apple-Silicon-hosted language model decides the driving
+strategy. You don't write code for these — you configure two things:
+
+- a **model path** (chosen from a curated dropdown of MLX
+  `mlx-community/...` models, or a free-text custom path), and
+- a **system prompt** that tells the model how to race.
+
+A new LLM bot in Tinker pre-fills the system prompt with the
+default racing prompt so you can tweak rather than start from scratch.
+
+Architecturally the LLM bot uses a two-tier setup:
+
+```
+LLM Strategist (~1Hz async)            Deterministic Controller (20Hz sync)
+    obs (text) → Intent JSON       →     reads latest Intent,
+    {target_speed_kmh,                    emits steer / accel / brake
+     racing_line_offset_m,                flags (the same PlayerInput
+     aggression}                          that humans / Python bots emit)
+```
+
+The strategist's slow LLM call doesn't block the 20Hz tick — the
+controller holds the last good Intent if a call is in-flight or fails.
+LLM bots and Python bots compete in the same races, against each
+other and against humans, with no special handling beyond the lobby
+add-bot dispatch.
+
+To create one: open **Tinker → New bot → LLM bot**. Fill in the name,
+pick a model from the dropdown (or paste a custom HuggingFace path),
+and edit the system prompt to taste. Then race it like any other bot.
+
+MLX is an Apple-Silicon-only optional dependency. Install it once
+with `pip install -r backend/requirements-agents.txt`; without it,
+LLM bots cannot be added to a lobby and the Add button will show a
+clear error.

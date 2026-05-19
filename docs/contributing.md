@@ -60,15 +60,19 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
+# Optional: LLM agents (Apple Silicon only)
+# Required only if you want to work on the LLM-driven car feature.
+pip install -r requirements-agents.txt
+
 # Frontend setup
 cd ../frontend
 npm install
 
 # Run tests to verify setup
 cd ../backend
-pytest tests/
+./venv/bin/python -m pytest tests/
 cd ../frontend
-npm test  # (when tests are added)
+npm test -- --run
 ```
 
 ---
@@ -93,6 +97,8 @@ npm test  # (when tests are added)
 2. **Create or assign yourself to an issue**
    - Comment on the issue to indicate you're working on it
    - Get clarification if requirements are unclear
+   - Active milestones: see https://github.com/ettoreferranti/code-rally/milestones
+     (M1–M7 are shipped; future work lives in unscheduled issues)
 
 3. **Create a feature branch**
    ```bash
@@ -108,16 +114,23 @@ npm test  # (when tests are added)
 
 5. **Test thoroughly**
    ```bash
-   # Backend tests
+   # Backend tests (~415 tests)
    cd backend
-   pytest tests/ -v
+   ./venv/bin/python -m pytest tests/ -v
 
-   # Frontend tests (when available)
+   # Frontend tests (~34 tests)
    cd frontend
-   npm test
+   npm test -- --run
+
+   # TypeScript type check + production build
+   cd frontend
+   npm run build
 
    # Manual testing
-   # Test your feature in both single-player and multiplayer modes
+   # Create a solo lobby on /lobbies and add your bot through Tinker
+   # — that's the modern equivalent of the old "Practice Mode". For
+   # multi-bot scenarios, add a second human (a second browser window
+   # with a different username) or add bots from the same library.
    ```
 
 6. **Commit your changes**
@@ -337,22 +350,29 @@ pytest tests/ -v
 
 ### Frontend Tests
 
-Frontend tests use **React Testing Library** (to be implemented).
+Frontend tests use **Vitest + React Testing Library**. The suite covers
+the lobby and Tinker pages, the user-menu, and the agent thought
+bubble. Add tests in a `<Component>.test.tsx` file next to the
+component.
 
 ```typescript
+import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { GameCanvas } from './GameCanvas';
+import { CountdownOverlay } from './CountdownOverlay';
 
-describe('GameCanvas', () => {
-  it('renders canvas element', () => {
-    const mockState = { /* ... */ };
-    render(<GameCanvas gameState={mockState} onInput={() => {}} />);
-
-    const canvas = screen.getByRole('canvas');
-    expect(canvas).toBeInTheDocument();
+describe('CountdownOverlay', () => {
+  it('renders the countdown number when visible', () => {
+    render(
+      <CountdownOverlay countdown={3} isVisible={true} raceStatus="countdown" />,
+    );
+    expect(screen.getByText('3')).toBeInTheDocument();
   });
 });
 ```
+
+Run with `npm test -- --run` (one shot) or `npm run test:watch`.
+`npm run build` runs `tsc -b && vite build` and is the most thorough
+TypeScript check.
 
 ---
 
