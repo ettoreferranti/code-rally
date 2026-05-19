@@ -5,7 +5,6 @@ import { RaceHUD } from '../components/RaceHUD';
 import { CountdownOverlay } from '../components/CountdownOverlay';
 import { RaceResultsScreen } from '../components/RaceResultsScreen';
 import { GameWebSocketClient, type GameStateMessage } from '../services';
-import { useUsername } from '../hooks/useUsername';
 
 export default function MultiplayerRace() {
   const [track, setTrack] = useState<Track | null>(null);
@@ -17,8 +16,6 @@ export default function MultiplayerRace() {
   const [raceStarted, setRaceStarted] = useState(false);
   const [raceResults, setRaceResults] = useState<PlayerResult[] | null>(null);
   const [showResults, setShowResults] = useState(false);
-
-  const { username } = useUsername();
 
   // Parse seed and session_id from URL (memoized to only calculate once)
   const seed = useMemo(() => {

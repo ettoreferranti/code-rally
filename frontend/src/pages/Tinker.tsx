@@ -383,7 +383,7 @@ export default function Tinker() {
                   Saved.
                 </div>
               )}
-              <BotEditor code={code} onChange={setCode} />
+              <BotEditor value={code} onChange={setCode} />
             </div>
           ) : (
             <div className="space-y-4">

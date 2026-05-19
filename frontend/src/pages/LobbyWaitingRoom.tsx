@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
-import type { Lobby, LobbyMember } from '../services';
+import type { Lobby } from '../services';
 import { useUsername } from '../hooks/useUsername';
 import { getUserBots, type BotListItem } from '../services/botApi';
 import { getWsBaseUrl } from '../config';

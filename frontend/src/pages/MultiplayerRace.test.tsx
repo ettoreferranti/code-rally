@@ -4,13 +4,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { userEvent } from '@testing-library/user-event';
 import MultiplayerRace from './MultiplayerRace';
-import * as botApi from '../services/botApi';
 import { GameWebSocketClient } from '../services/gameWebSocket';
 
 // Mock the bot API
-vi.mock('../services/botApi');
 
 // Mock the WebSocket client
 vi.mock('../services/gameWebSocket', () => {
@@ -101,7 +98,6 @@ describe('MultiplayerRace - Spectator Mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     originalSearch = window.location.search;
-    vi.mocked(botApi.getUserBots).mockResolvedValue([]);
     simulateConnect();
   });
 
