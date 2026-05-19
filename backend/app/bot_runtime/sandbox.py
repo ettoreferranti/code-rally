@@ -90,6 +90,28 @@ def _safe_import(name, *args, **kwargs):
     raise SandboxSecurityError(f"Module '{name}' not available")
 
 
+def _inplace_op(op: str, var: Any, value: Any) -> Any:
+    """Implement augmented assignment for RestrictedPython.
+
+    ``x += y`` in a bot compiles to ``x = _inplacevar_('+=', x, y)``;
+    we route every operator to the corresponding binary op on the values.
+    No I/O, no attribute access — purely arithmetic on what's passed in.
+    """
+    if op == '+=':  return var + value
+    if op == '-=':  return var - value
+    if op == '*=':  return var * value
+    if op == '/=':  return var / value
+    if op == '//=': return var // value
+    if op == '%=':  return var % value
+    if op == '**=': return var ** value
+    if op == '<<=': return var << value
+    if op == '>>=': return var >> value
+    if op == '|=':  return var | value
+    if op == '^=':  return var ^ value
+    if op == '&=':  return var & value
+    raise NotImplementedError(f"Augmented assignment {op!r} is not supported")
+
+
 def _create_safe_globals() -> Dict[str, Any]:
     """
     Create a safe globals dictionary for bot execution.
@@ -154,6 +176,13 @@ def _create_safe_globals() -> Dict[str, Any]:
         '_getattr_': safer_getattr,
         '_getitem_': lambda obj, index: obj[index],  # Allow list/dict access
         '_write_': full_write_guard,
+        # RestrictedPython compiles `x += y` (and other augmented ops on
+        # local variables) into a call to `_inplacevar_(op, x, y)`. Without
+        # this entry the bot crashes at runtime with `NameError: name
+        # '_inplacevar_' is not defined` the first time on_tick hits an
+        # in-place operator. Operations only touch the passed values
+        # (no I/O, no attribute access) so it's safe by construction.
+        '_inplacevar_': _inplace_op,
         '__metaclass__': type,
         '__name__': 'restricted_module',
         # Make GuardedBotBase available to bot code

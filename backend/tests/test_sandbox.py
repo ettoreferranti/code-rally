@@ -350,6 +350,40 @@ class SmartBot(GuardedBotBase):
         assert bot_instance is not None
         assert bot_instance.name == "Smart Bot"
 
+    def test_allows_augmented_assignment_on_local(self):
+        """Bots should be able to use +=, -=, etc. on local variables.
+        RestrictedPython compiles these to calls to `_inplacevar_`, which
+        the sandbox must define.
+
+        Surfaced when a user's bot crashed in on_tick with:
+            NameError: name '_inplacevar_' is not defined
+
+        Note: RestrictedPython itself rejects augmented assignment to
+        ATTRIBUTES at compile time ("Augmented assignment of attributes
+        is not allowed.") and that's enforced elsewhere. This test pins
+        the local-variable case which is the most common.
+        """
+        valid_code = """
+class CounterBot(GuardedBotBase):
+    def __init__(self):
+        self.name = "Counter Bot"
+
+    def on_tick(self, state):
+        local = 0
+        local += 5
+        local -= 1
+        local *= 2
+        return {'accelerate': True, 'computed': local}
+"""
+        sandbox = BotSandbox()
+        bot_instance = sandbox.execute_bot_code(valid_code, "CounterBot")
+        mock_state = create_mock_state()
+
+        # The NameError surfaces during on_tick, not at compile.
+        result = sandbox.call_on_tick(bot_instance, mock_state)
+        assert result['accelerate'] is True
+        assert result['computed'] == 8  # (0 + 5 - 1) * 2
+
     def test_allows_bot_with_memory(self):
         """Test that bot can use self.memory."""
         valid_code = """

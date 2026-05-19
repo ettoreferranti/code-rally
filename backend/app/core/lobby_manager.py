@@ -182,17 +182,16 @@ class LobbyManager:
         del lobby.members[player_id]
         logger.info(f"Player {player_id} left lobby {lobby_id} ({lobby.get_member_count()} remaining)")
 
-        # Handle host leaving
-        if lobby.is_host(player_id):
-            if lobby.members:
-                old_host = player_id
-                lobby.transfer_host()
-                logger.info(f"Host transferred from {old_host} to {lobby.host_player_id} in lobby {lobby_id}")
-            else:
-                # No members left - disband lobby
-                logger.info(f"Lobby {lobby_id} empty, disbanding")
-                lobby.status = LobbyStatus.DISBANDED
-                self._cleanup_lobby(lobby_id)
+        # Handle host leaving: transfer to another member if any.
+        # We intentionally do NOT auto-disband an empty lobby anymore —
+        # users want to be able to leave (e.g. to go to Tinker) and come
+        # back to their own lobby. host_player_id stays stable so the
+        # creator can re-enter as host via Resume. Explicit deletion is
+        # tracked separately as #169.
+        if lobby.is_host(player_id) and lobby.members:
+            old_host = player_id
+            lobby.transfer_host()
+            logger.info(f"Host transferred from {old_host} to {lobby.host_player_id} in lobby {lobby_id}")
 
         return True
 

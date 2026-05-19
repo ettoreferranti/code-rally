@@ -279,17 +279,23 @@ class TestLobbyManager:
         assert retrieved.host_player_id in ["player2", "player3"]
         assert len(retrieved.members) == 2
 
-    def test_last_member_leaves_disbands_lobby(self, manager):
-        """Test that lobby is disbanded when last member leaves."""
+    def test_last_member_leaves_keeps_lobby_alive(self, manager):
+        """When the last member (also the host) leaves, the lobby stays in
+        WAITING so the user can come back and Resume. We do NOT auto-disband
+        — that hid the user's own lobbies from /lobbies whenever they
+        navigated to Tinker and back. Explicit deletion is tracked as #169.
+        """
         lobby = manager.create_lobby("Test Lobby", "player1")
 
-        # Host leaves (only member)
         result = manager.leave_lobby(lobby.lobby_id, "player1")
         assert result is True
 
-        # Lobby should be cleaned up
         retrieved = manager.get_lobby(lobby.lobby_id)
-        assert retrieved is None
+        assert retrieved is not None, "Lobby should NOT auto-disband on empty"
+        assert retrieved.status == LobbyStatus.WAITING
+        assert retrieved.get_member_count() == 0
+        # host_player_id stays as the creator so they can Resume as host.
+        assert retrieved.host_player_id == "player1"
 
     def test_leave_lobby_not_member(self, manager):
         """Test leaving lobby when not a member."""
