@@ -16,10 +16,15 @@ export interface User {
   updated_at: string;
 }
 
+export type BotKind = 'python' | 'llm';
+
 export interface Bot {
   id: number;
   name: string;
-  code: string;
+  kind: BotKind;
+  code: string;  // empty string for kind='llm'
+  model_path?: string | null;  // kind='llm' only
+  system_prompt?: string | null;  // kind='llm' only
   user_id: number;
   created_at: string;
   updated_at: string;
@@ -28,6 +33,8 @@ export interface Bot {
 export interface BotListItem {
   id: number;
   name: string;
+  kind: BotKind;
+  model_path?: string | null;  // kind='llm' only
   user_id: number;
   created_at: string;
   updated_at: string;
@@ -35,12 +42,24 @@ export interface BotListItem {
 
 export interface CreateBotRequest {
   name: string;
-  code: string;
+  kind?: BotKind;  // defaults to 'python' on the backend
+  code?: string;  // required for kind='python'
+  model_path?: string;  // required for kind='llm'
+  system_prompt?: string;  // required for kind='llm'
 }
 
 export interface UpdateBotRequest {
   name?: string;
-  code?: string;
+  code?: string;  // python bots only
+  model_path?: string;  // llm bots only
+  system_prompt?: string;  // llm bots only
+}
+
+export interface ModelPreset {
+  label: string;
+  model_path: string;
+  description: string;
+  default: boolean;
 }
 
 export interface TemplateInfo {
@@ -261,5 +280,17 @@ export async function getTemplate(templateId: string): Promise<TemplateCodeRespo
     throw new Error(error.detail || `Failed to get template: ${response.statusText}`);
   }
 
+  return response.json();
+}
+
+/**
+ * Fetch the curated MLX model presets for the Tinker LLM-bot wizard.
+ * Source of truth is `backend/app/agents/llm_model_presets.json`.
+ */
+export async function getLlmModelPresets(): Promise<ModelPreset[]> {
+  const response = await fetch(`${API_BASE_URL}/llm-models`);
+  if (!response.ok) {
+    throw new Error(`Failed to load model presets: ${response.statusText}`);
+  }
   return response.json();
 }

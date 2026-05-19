@@ -1,7 +1,7 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import { UserSwitcherProvider } from './components/UserSwitcherProvider'
-import { Home, Practice, MultiplayerRace, Editor } from './pages'
+import { Home, MultiplayerRace, Tinker } from './pages'
 import LobbyBrowser from './pages/LobbyBrowser'
 import LobbyWaitingRoom from './pages/LobbyWaitingRoom'
 import JoinLobby from './pages/JoinLobby'
@@ -13,10 +13,10 @@ function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Home />} />
-            <Route path="practice" element={<Practice />} />
-            <Route path="multiplayer" element={<MultiplayerRace />} />
             <Route path="race" element={<MultiplayerRace />} />
-            <Route path="editor" element={<Editor />} />
+            <Route path="tinker" element={<Tinker />} />
+            {/* Old /editor URL redirects to the new Tinker page. */}
+            <Route path="editor" element={<Navigate to="/tinker" replace />} />
             <Route path="lobbies" element={<LobbyBrowser />} />
             <Route path="lobby/:lobbyId" element={<LobbyWaitingRoom />} />
             <Route path="join/:code" element={<JoinLobby />} />
