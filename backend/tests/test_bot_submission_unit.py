@@ -68,6 +68,74 @@ class AcceleratorBot(BaseBot):
     return bot
 
 
+class TestLlmBot:
+    """LLM-driven bots persist alongside Python bots in the same table,
+    discriminated by `kind`. See the Tinker / lobby cleanup work."""
+
+    def test_create_llm_bot_persists_model_and_prompt(self, db_session, test_user):
+        bot = bot_service.create_llm_bot(
+            db=db_session,
+            user_id=test_user.id,
+            name="AggressiveQwen",
+            model_path="mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+            system_prompt="Drive fast. Output JSON only.",
+        )
+        assert bot.id is not None
+        assert bot.kind == "llm"
+        assert bot.name == "AggressiveQwen"
+        assert bot.model_path == "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
+        assert bot.system_prompt == "Drive fast. Output JSON only."
+        # Python `code` column stays NOT NULL in the schema, so LLM bots
+        # use empty string as the canonical "no code" sentinel.
+        assert bot.code == ""
+
+    def test_create_llm_bot_rejects_empty_model_path(self, db_session, test_user):
+        with pytest.raises(ValueError, match=r"(?i)model"):
+            bot_service.create_llm_bot(
+                db=db_session,
+                user_id=test_user.id,
+                name="Bad",
+                model_path="",
+                system_prompt="anything",
+            )
+
+    def test_create_llm_bot_rejects_empty_system_prompt(self, db_session, test_user):
+        with pytest.raises(ValueError, match=r"(?i)prompt"):
+            bot_service.create_llm_bot(
+                db=db_session,
+                user_id=test_user.id,
+                name="Bad",
+                model_path="mlx-community/x",
+                system_prompt="",
+            )
+
+    def test_create_llm_bot_rejects_duplicate_name(self, db_session, test_user):
+        bot_service.create_llm_bot(
+            db=db_session, user_id=test_user.id, name="Same",
+            model_path="mlx-community/x", system_prompt="p",
+        )
+        with pytest.raises(ValueError, match=r"already exists"):
+            bot_service.create_llm_bot(
+                db=db_session, user_id=test_user.id, name="Same",
+                model_path="mlx-community/y", system_prompt="p",
+            )
+
+    def test_list_returns_both_kinds(self, db_session, test_user, test_bot):
+        # test_bot fixture is a Python bot. Add an LLM bot in the same user's library.
+        bot_service.create_llm_bot(
+            db=db_session, user_id=test_user.id, name="MyLLM",
+            model_path="mlx-community/x", system_prompt="p",
+        )
+        bots = bot_service.get_bots_by_user(db_session, test_user.id)
+        kinds = {b.kind for b in bots}
+        assert kinds == {"python", "llm"}
+
+    def test_default_kind_for_existing_python_bot_is_python(self, test_bot):
+        # Existing factory creates a Python bot without specifying `kind`.
+        # SQLAlchemy default should give us 'python'.
+        assert test_bot.kind == "python"
+
+
 class TestBotLookup:
     """Test bot database lookup logic."""
 

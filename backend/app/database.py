@@ -71,12 +71,38 @@ def init_db() -> None:
     """
     Initialise the database.
 
-    Creates all tables defined in the models if they don't exist.
-    This is called on application startup.
+    Creates all tables defined in the models if they don't exist, then
+    runs idempotent ad-hoc migrations for columns SQLAlchemy
+    `create_all` can't add to pre-existing tables.
     """
     # Import all models here so they are registered with Base
     from app.models.user import User
     from app.models.bot import Bot
 
     Base.metadata.create_all(bind=engine)
+    _migrate_bots_table_for_llm_kind()
     print(f"Database initialised at {DB_FILE}")
+
+
+def _migrate_bots_table_for_llm_kind() -> None:
+    """Add the kind / model_path / system_prompt columns to existing
+    `bots` tables that pre-date the Tinker / unified bot-library work.
+
+    Idempotent: each `ALTER TABLE` only fires if the column is missing.
+    """
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        existing_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(bots)"))}
+        if not existing_cols:
+            return  # Fresh DB — create_all already produced the new schema.
+
+        if "kind" not in existing_cols:
+            conn.execute(text(
+                "ALTER TABLE bots ADD COLUMN kind TEXT NOT NULL DEFAULT 'python'"
+            ))
+        if "model_path" not in existing_cols:
+            conn.execute(text("ALTER TABLE bots ADD COLUMN model_path TEXT"))
+        if "system_prompt" not in existing_cols:
+            conn.execute(text("ALTER TABLE bots ADD COLUMN system_prompt TEXT"))
+        conn.commit()

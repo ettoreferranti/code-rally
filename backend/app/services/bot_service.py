@@ -143,11 +143,69 @@ def create_bot(db: Session, user_id: int, name: str, code: str) -> Bot:
     return new_bot
 
 
+def create_llm_bot(
+    db: Session,
+    user_id: int,
+    name: str,
+    model_path: str,
+    system_prompt: str,
+) -> Bot:
+    """
+    Create a new LLM-driven bot in the user's library.
+
+    Args:
+        db: Database session
+        user_id: Owner user ID
+        name: Bot display name
+        model_path: HuggingFace / local model path consumed by MLX
+        system_prompt: Strategist system-prompt override for this bot
+
+    Returns:
+        Created Bot object (kind='llm')
+
+    Raises:
+        ValueError: name invalid, model/prompt missing, or duplicate name
+    """
+    is_valid, error_message = validate_bot_name(name)
+    if not is_valid:
+        raise ValueError(error_message)
+    name = name.strip()
+
+    if not model_path or not model_path.strip():
+        raise ValueError("Model path is required for an LLM bot")
+    if not system_prompt or not system_prompt.strip():
+        raise ValueError("System prompt is required for an LLM bot")
+
+    existing_bot = db.query(Bot).filter(
+        Bot.user_id == user_id,
+        Bot.name == name,
+    ).first()
+    if existing_bot:
+        raise ValueError(f"Bot with name '{name}' already exists")
+
+    new_bot = Bot(
+        name=name,
+        kind="llm",
+        code="",  # NOT NULL at the schema level — see Bot model docstring.
+        model_path=model_path.strip(),
+        system_prompt=system_prompt,
+        user_id=user_id,
+    )
+
+    db.add(new_bot)
+    db.commit()
+    db.refresh(new_bot)
+
+    return new_bot
+
+
 def update_bot(
     db: Session,
     bot_id: int,
     name: Optional[str] = None,
-    code: Optional[str] = None
+    code: Optional[str] = None,
+    model_path: Optional[str] = None,
+    system_prompt: Optional[str] = None,
 ) -> Bot:
     """
     Update an existing bot.
@@ -189,13 +247,30 @@ def update_bot(
 
         bot.name = name
 
-    # Update code if provided
+    # Update code if provided. Only meaningful for Python bots.
     if code is not None:
+        if bot.kind != "python":
+            raise ValueError("Cannot set `code` on a non-Python bot")
         is_valid, error_message = validate_bot_code(code)
         if not is_valid:
             raise ValueError(error_message)
 
         bot.code = code
+
+    # Update LLM fields if provided. Only meaningful for LLM bots.
+    if model_path is not None:
+        if bot.kind != "llm":
+            raise ValueError("Cannot set `model_path` on a non-LLM bot")
+        if not model_path.strip():
+            raise ValueError("Model path is required for an LLM bot")
+        bot.model_path = model_path.strip()
+
+    if system_prompt is not None:
+        if bot.kind != "llm":
+            raise ValueError("Cannot set `system_prompt` on a non-LLM bot")
+        if not system_prompt.strip():
+            raise ValueError("System prompt is required for an LLM bot")
+        bot.system_prompt = system_prompt
 
     db.commit()
     db.refresh(bot)

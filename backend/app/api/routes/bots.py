@@ -1,7 +1,8 @@
 """
 Bot API endpoints for CRUD operations on user bots.
 
-Provides bot management with RestrictedPython validation.
+Provides bot management with RestrictedPython validation for Python bots
+and persistence of model_path + system_prompt for LLM bots.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,22 +21,39 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 
 # Request/Response models
 class CreateBotRequest(BaseModel):
-    """Request model for creating a bot."""
+    """Request model for creating either a Python or LLM bot.
+
+    The `kind` discriminator selects which kind-specific fields apply:
+      - 'python' (default): `code` is required.
+      - 'llm': `model_path` and `system_prompt` are required.
+    """
     name: str = Field(..., min_length=1, max_length=100, description="Bot display name")
-    code: str = Field(..., min_length=1, description="Python source code")
+    kind: str = Field("python", description="'python' or 'llm'")
+    code: Optional[str] = Field(None, description="Python source code (required for kind='python')")
+    model_path: Optional[str] = Field(None, description="Model path (required for kind='llm')")
+    system_prompt: Optional[str] = Field(None, description="System prompt (required for kind='llm')")
 
 
 class UpdateBotRequest(BaseModel):
-    """Request model for updating a bot."""
+    """Request model for updating a bot.
+
+    Update fields that match the bot's `kind`. Kind itself is immutable
+    after creation.
+    """
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="New bot name (optional)")
-    code: Optional[str] = Field(None, min_length=1, description="New Python source code (optional)")
+    code: Optional[str] = Field(None, min_length=1, description="New Python source code (Python bots only)")
+    model_path: Optional[str] = Field(None, description="New model path (LLM bots only)")
+    system_prompt: Optional[str] = Field(None, description="New system prompt (LLM bots only)")
 
 
 class BotResponse(BaseModel):
-    """Response model for bot data."""
+    """Response model for bot data (full)."""
     id: int
     name: str
+    kind: str
     code: str
+    model_path: Optional[str] = None
+    system_prompt: Optional[str] = None
     user_id: int
     created_at: datetime
     updated_at: datetime
@@ -45,9 +63,11 @@ class BotResponse(BaseModel):
 
 
 class BotListResponse(BaseModel):
-    """Response model for bot listing."""
+    """Response model for bot listing (kind + model surfaced; code omitted)."""
     id: int
     name: str
+    kind: str
+    model_path: Optional[str] = None
     user_id: int
     created_at: datetime
     updated_at: datetime
@@ -211,7 +231,21 @@ async def create_bot(
         raise HTTPException(status_code=404, detail="User not found")
 
     try:
-        bot = bot_service.create_bot(db, user.id, request.name, request.code)
+        if request.kind == "python":
+            if not request.code:
+                raise HTTPException(status_code=400, detail="`code` is required for kind='python'")
+            bot = bot_service.create_bot(db, user.id, request.name, request.code)
+        elif request.kind == "llm":
+            if not request.model_path or not request.system_prompt:
+                raise HTTPException(
+                    status_code=400,
+                    detail="`model_path` and `system_prompt` are required for kind='llm'",
+                )
+            bot = bot_service.create_llm_bot(
+                db, user.id, request.name, request.model_path, request.system_prompt
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown bot kind: {request.kind!r}")
         return bot
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -245,11 +279,26 @@ async def update_bot(
         500: Database error
     """
     # Ensure at least one field is being updated
-    if request.name is None and request.code is None:
-        raise HTTPException(status_code=400, detail="Must provide at least one field to update (name or code)")
+    if (
+        request.name is None
+        and request.code is None
+        and request.model_path is None
+        and request.system_prompt is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Must provide at least one field to update",
+        )
 
     try:
-        bot = bot_service.update_bot(db, bot_id, request.name, request.code)
+        bot = bot_service.update_bot(
+            db,
+            bot_id,
+            name=request.name,
+            code=request.code,
+            model_path=request.model_path,
+            system_prompt=request.system_prompt,
+        )
         return bot
     except ValueError as e:
         # Check if it's a "not found" error
