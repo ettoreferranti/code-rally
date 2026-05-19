@@ -1,9 +1,8 @@
 /**
- * LobbyWaitingRoom tests for the "Add LLM Bot" feature (issue #157).
+ * LobbyWaitingRoom tests for the unified "Add bot" picker.
  *
- * Mocks the WebSocket constructor so we can drive the lobby into the
- * host view and observe the message the UI sends when the host clicks
- * "Add LLM Bot".
+ * Mocks the WebSocket constructor (so we can observe outbound messages)
+ * and the bot library fetch (so the dropdown is populated).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -14,6 +13,30 @@ import LobbyWaitingRoom from './LobbyWaitingRoom';
 
 vi.mock('../hooks/useUsername', () => ({
   useUsername: () => ({ username: 'alice', loading: false }),
+}));
+
+// Stub the user's bot library so the unified dropdown has options.
+vi.mock('../services/botApi', () => ({
+  getUserBots: async () => [
+    {
+      id: 11,
+      name: 'SpeedBot',
+      kind: 'python',
+      model_path: null,
+      user_id: 1,
+      created_at: '',
+      updated_at: '',
+    },
+    {
+      id: 22,
+      name: 'AggressiveQwen',
+      kind: 'llm',
+      model_path: 'mlx-community/Qwen2.5-1.5B-Instruct-4bit',
+      user_id: 1,
+      created_at: '',
+      updated_at: '',
+    },
+  ],
 }));
 
 /** A minimal WebSocket stub we can install on globalThis. */
@@ -107,50 +130,46 @@ const baseLobby = {
   ],
 };
 
-describe('LobbyWaitingRoom — Add LLM Bot', () => {
+describe('LobbyWaitingRoom — unified add-bot', () => {
   beforeEach(() => {
     FakeWebSocket.lastInstance = null;
     (globalThis as any).WebSocket = FakeWebSocket;
   });
 
-  it('shows the Add LLM Bot button when the user is the host', async () => {
+  it('shows the unified bot picker when the user is the host', async () => {
     renderLobby();
     await waitFor(() => expect(FakeWebSocket.lastInstance).toBeTruthy());
     act(() => pushLobbyJoined(baseLobby));
 
-    expect(await screen.findByTestId('add-llm-bot-button')).toBeInTheDocument();
-    expect(screen.getByTestId('llm-model-input')).toBeInTheDocument();
+    expect(await screen.findByTestId('add-bot-select')).toBeInTheDocument();
+    expect(screen.getByTestId('add-bot-button')).toBeInTheDocument();
   });
 
-  it('sends add_llm_bot_to_lobby with no model_path when the field is empty', async () => {
+  it('lists both Python and LLM bots in the picker with kind badges in the label', async () => {
     renderLobby();
     await waitFor(() => expect(FakeWebSocket.lastInstance).toBeTruthy());
     act(() => pushLobbyJoined(baseLobby));
 
-    const button = await screen.findByTestId('add-llm-bot-button');
-    await userEvent.click(button);
-
-    const sent = FakeWebSocket.lastInstance!.sent.map((s) => JSON.parse(s));
-    const addMsg = sent.find((m) => m.type === 'add_llm_bot_to_lobby');
-    expect(addMsg).toBeTruthy();
-    expect(addMsg.data).toEqual({});
+    const select = (await screen.findByTestId('add-bot-select')) as HTMLSelectElement;
+    const optionTexts = Array.from(select.options).map((o) => o.textContent ?? '');
+    expect(optionTexts.some((t) => t.includes('[PY]') && t.includes('SpeedBot'))).toBe(true);
+    expect(optionTexts.some((t) => t.includes('[LLM]') && t.includes('AggressiveQwen'))).toBe(true);
   });
 
-  it('sends model_path when the input has a value', async () => {
+  it('sends add_bot_to_lobby with bot_id when "Add to lobby" is clicked', async () => {
     renderLobby();
     await waitFor(() => expect(FakeWebSocket.lastInstance).toBeTruthy());
     act(() => pushLobbyJoined(baseLobby));
 
-    const input = await screen.findByTestId('llm-model-input');
-    await userEvent.type(input, 'mlx-community/Qwen2.5-7B-Instruct-4bit');
-    await userEvent.click(screen.getByTestId('add-llm-bot-button'));
+    const select = (await screen.findByTestId('add-bot-select')) as HTMLSelectElement;
+    await userEvent.selectOptions(select, '22');  // The LLM bot
+    await userEvent.click(screen.getByTestId('add-bot-button'));
 
     const addMsg = FakeWebSocket.lastInstance!.sent
       .map((s) => JSON.parse(s))
-      .find((m) => m.type === 'add_llm_bot_to_lobby');
-    expect(addMsg.data).toEqual({
-      model_path: 'mlx-community/Qwen2.5-7B-Instruct-4bit',
-    });
+      .find((m) => m.type === 'add_bot_to_lobby');
+    expect(addMsg).toBeTruthy();
+    expect(addMsg.data).toEqual({ bot_id: 22 });
   });
 
   it('renders an LLM badge for members with driver_kind="llm_bot"', async () => {
@@ -162,13 +181,13 @@ describe('LobbyWaitingRoom — Add LLM Bot', () => {
       members: [
         ...baseLobby.members,
         {
-          player_id: 'llm-bot-1-abcdef',
-          username: 'LLM Bot 1',
+          player_id: 'llm-alice-22',
+          username: 'alice/AggressiveQwen',
           driver_kind: 'llm_bot',
           is_bot: true,
-          bot_id: null,
+          bot_id: 22,
           ready: true,
-          llm_model_path: null,
+          llm_model_path: 'mlx-community/Qwen2.5-1.5B-Instruct-4bit',
         },
       ],
     };
@@ -182,7 +201,6 @@ describe('LobbyWaitingRoom — Add LLM Bot', () => {
     await waitFor(() => expect(FakeWebSocket.lastInstance).toBeTruthy());
     act(() => pushLobbyJoined(baseLobby));
 
-    // No LLM bot initially.
     expect(screen.queryByTestId('llm-bot-badge')).toBeNull();
 
     const updated = {
@@ -190,11 +208,11 @@ describe('LobbyWaitingRoom — Add LLM Bot', () => {
       members: [
         ...baseLobby.members,
         {
-          player_id: 'llm-bot-1-abcdef',
-          username: 'LLM Bot 1',
+          player_id: 'llm-alice-22',
+          username: 'alice/AggressiveQwen',
           driver_kind: 'llm_bot',
           is_bot: true,
-          bot_id: null,
+          bot_id: 22,
           ready: true,
           llm_model_path: 'mlx-community/Qwen2.5-7B-Instruct-4bit',
         },

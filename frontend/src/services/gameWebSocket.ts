@@ -64,27 +64,16 @@ export interface ConnectedMessage {
   };
 }
 
-export interface BotSubmissionResponseMessage {
-  type: 'bot_submission_response';
-  data: {
-    success: boolean;
-    bot_player_id?: string;
-    bot_name?: string;
-    error?: string;
-  };
-}
-
 export interface PingMessage {
   type: 'ping';
   timestamp?: number;
 }
 
-export type ServerMessage = GameStateMessage | ConnectedMessage | BotSubmissionResponseMessage | PingMessage;
+export type ServerMessage = GameStateMessage | ConnectedMessage | PingMessage;
 
 export interface GameWebSocketCallbacks {
   onConnected?: (sessionId: string, playerId: string, track: Track) => void;
   onGameState?: (state: GameStateMessage['data']) => void;
-  onBotSubmissionResponse?: (response: BotSubmissionResponseMessage['data']) => void;
   onDisconnected?: () => void;
   onError?: (error: Event) => void;
 }
@@ -217,20 +206,6 @@ export class GameWebSocketClient {
   }
 
   /**
-   * Submit a bot to the race.
-   */
-  sendBot(botId: number): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    this.ws.send(JSON.stringify({
-      type: 'submit_bot',
-      data: { bot_id: botId },
-    }));
-  }
-
-  /**
    * Handle incoming message from server.
    */
   private handleMessage(message: ServerMessage): void {
@@ -248,10 +223,6 @@ export class GameWebSocketClient {
 
       case 'game_state':
         this.callbacks.onGameState?.(message.data);
-        break;
-
-      case 'bot_submission_response':
-        this.callbacks.onBotSubmissionResponse?.(message.data);
         break;
 
       case 'ping':

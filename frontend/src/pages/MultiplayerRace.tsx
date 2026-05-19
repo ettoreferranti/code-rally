@@ -5,7 +5,6 @@ import { RaceHUD } from '../components/RaceHUD';
 import { CountdownOverlay } from '../components/CountdownOverlay';
 import { RaceResultsScreen } from '../components/RaceResultsScreen';
 import { GameWebSocketClient, type GameStateMessage } from '../services';
-import { getUserBots, type BotListItem } from '../services/botApi';
 import { useUsername } from '../hooks/useUsername';
 
 export default function MultiplayerRace() {
@@ -19,12 +18,7 @@ export default function MultiplayerRace() {
   const [raceResults, setRaceResults] = useState<PlayerResult[] | null>(null);
   const [showResults, setShowResults] = useState(false);
 
-  // Bot submission state
   const { username } = useUsername();
-  const [userBots, setUserBots] = useState<BotListItem[]>([]);
-  const [selectedBotId, setSelectedBotId] = useState<number | null>(null);
-  const [botSubmissionStatus, setBotSubmissionStatus] = useState<string | null>(null);
-  const [submittedBots, setSubmittedBots] = useState<Set<string>>(new Set());
 
   // Parse seed and session_id from URL (memoized to only calculate once)
   const seed = useMemo(() => {
@@ -69,17 +63,7 @@ export default function MultiplayerRace() {
 
   // Game state updates every tick (60 FPS) - no need to log this
 
-  // Load user's bots
-  useEffect(() => {
-    if (!username) return;
-
-    getUserBots(username)
-      .then((bots) => {
-        setUserBots(bots);
-        if (bots.length > 0) setSelectedBotId(bots[0].id);
-      })
-      .catch((err) => console.error('Failed to load bots:', err));
-  }, [username]);
+  // (Bot-library fetch removed — bots are added pre-race in the lobby.)
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -180,17 +164,6 @@ export default function MultiplayerRace() {
         }
       },
 
-      onBotSubmissionResponse: (response) => {
-        if (response.success) {
-          setBotSubmissionStatus(`✓ Bot "${response.bot_name}" submitted!`);
-          setSubmittedBots(prev => new Set(prev).add(response.bot_player_id!));
-          setTimeout(() => setBotSubmissionStatus(null), 3000);
-        } else {
-          setBotSubmissionStatus(`✗ Error: ${response.error}`);
-          setTimeout(() => setBotSubmissionStatus(null), 5000);
-        }
-      },
-
       onDisconnected: () => {
         console.log('Disconnected from game session');
         setError('Disconnected from server');
@@ -244,21 +217,13 @@ export default function MultiplayerRace() {
     console.log('Start Race clicked');
     if (wsRef.current && wsRef.current.isConnected()) {
       console.log('Sending start race command...');
-      // Reset flags for new race
       hasShownResultsRef.current = false;
       hasClosedResultsRef.current = false;
-      setSubmittedBots(new Set());
       wsRef.current.startRace();
       setRaceStarted(true);
     } else {
       console.log('WebSocket not connected!');
     }
-  };
-
-  const handleSubmitBot = () => {
-    if (!selectedBotId || !wsRef.current?.isConnected()) return;
-    wsRef.current.sendBot(selectedBotId);
-    setBotSubmissionStatus('Submitting bot...');
   };
 
   const handleCloseResults = () => {
@@ -380,37 +345,8 @@ export default function MultiplayerRace() {
                 Start Race
               </button>
             )}
-            {userBots.length > 0 && (
-              <div className="flex gap-2 items-center">
-                <select
-                  value={selectedBotId || ''}
-                  onChange={(e) => setSelectedBotId(Number(e.target.value))}
-                  className="px-3 py-2 bg-gray-700 text-white rounded border border-gray-600"
-                >
-                  {userBots.map((bot) => (
-                    <option key={bot.id} value={bot.id}>{bot.name}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleSubmitBot}
-                  disabled={!selectedBotId || gameState?.raceInfo.raceStatus === 'countdown' || gameState?.raceInfo.raceStatus === 'finished'}
-                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
-                >
-                  Submit Bot
-                </button>
-              </div>
-            )}
-            {botSubmissionStatus && (
-              <div className={`px-4 py-2 rounded ${
-                botSubmissionStatus.startsWith('✓')
-                  ? 'bg-green-600/20 text-green-400 border border-green-600'
-                  : botSubmissionStatus.startsWith('✗')
-                  ? 'bg-red-600/20 text-red-400 border border-red-600'
-                  : 'bg-blue-600/20 text-blue-400 border border-blue-600'
-              }`}>
-                {botSubmissionStatus}
-              </div>
-            )}
+            {/* Mid-race bot submission was removed in the Tinker / lobby
+                cleanup — all bots are added pre-race in the lobby. */}
             <button
               onClick={() => window.location.reload()}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"

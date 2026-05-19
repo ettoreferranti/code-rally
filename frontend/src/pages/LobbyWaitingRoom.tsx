@@ -6,9 +6,10 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import type { Lobby, LobbyMember } from '../services';
 import { useUsername } from '../hooks/useUsername';
+import { getUserBots, type BotListItem } from '../services/botApi';
 import { getWsBaseUrl } from '../config';
 
 const WS_BASE_URL = getWsBaseUrl();
@@ -27,7 +28,10 @@ const LobbyWaitingRoom: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [llmModelPath, setLlmModelPath] = useState<string>('');
+
+  // Unified add-bot UI state (replaces the old LLM-only purple control).
+  const [botLibrary, setBotLibrary] = useState<BotListItem[]>([]);
+  const [selectedBotId, setSelectedBotId] = useState<number | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -152,20 +156,47 @@ const LobbyWaitingRoom: React.FC = () => {
     );
   };
 
-  const handleAddLlmBot = () => {
+  const handleAddBot = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setError('Not connected to server');
       return;
     }
-
-    const trimmed = llmModelPath.trim();
+    if (!selectedBotId) {
+      setError('Pick a bot from your library to add');
+      return;
+    }
     wsRef.current.send(
       JSON.stringify({
-        type: 'add_llm_bot_to_lobby',
-        data: trimmed ? { model_path: trimmed } : {},
+        type: 'add_bot_to_lobby',
+        data: { bot_id: selectedBotId },
       })
     );
   };
+
+  // Load the host's bot library once we know the username — used to
+  // populate the unified add-bot dropdown. Spectators don't need it.
+  useEffect(() => {
+    if (!username || isSpectator) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await getUserBots(username);
+        if (!cancelled) {
+          setBotLibrary(list);
+          if (list.length > 0 && selectedBotId === null) {
+            setSelectedBotId(list[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load bot library:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // selectedBotId intentionally not a dep — we only auto-select on first load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [username, isSpectator]);
 
   const handleLeaveLobby = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -288,14 +319,16 @@ const LobbyWaitingRoom: React.FC = () => {
                   {member.driver_kind === 'llm_bot' ? (
                     <span
                       data-testid="llm-bot-badge"
-                      className="px-2 py-1 bg-purple-700 text-purple-200 text-xs rounded"
+                      className="px-2 py-1 bg-purple-700 text-purple-200 text-xs rounded font-mono"
                       title={member.llm_model_path || 'default model'}
                     >
                       LLM
                     </span>
-                  ) : member.is_bot ? (
-                    <span className="px-2 py-1 bg-blue-700 text-blue-200 text-xs rounded">
-                      BOT
+                  ) : member.driver_kind === 'python_bot' || member.is_bot ? (
+                    <span
+                      className="px-2 py-1 bg-blue-700 text-blue-200 text-xs rounded font-mono"
+                    >
+                      PY
                     </span>
                   ) : null}
                 </div>
@@ -331,26 +364,51 @@ const LobbyWaitingRoom: React.FC = () => {
                 </p>
               </div>
 
-              {/* Add LLM Bot — research playground (#157) */}
-              <div className="mb-4 p-3 bg-gray-900 rounded border border-purple-700/40">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    data-testid="llm-model-input"
-                    type="text"
-                    value={llmModelPath}
-                    onChange={(e) => setLlmModelPath(e.target.value)}
-                    placeholder="model path (default: Qwen2.5-1.5B-Instruct-4bit)"
-                    className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm"
-                  />
-                  <button
-                    data-testid="add-llm-bot-button"
-                    onClick={handleAddLlmBot}
-                    disabled={lobbyState.members.length >= lobbyState.settings.max_players}
-                    className="px-4 py-2 bg-purple-700 hover:bg-purple-600 rounded text-sm font-semibold disabled:bg-gray-600 disabled:cursor-not-allowed whitespace-nowrap"
+              {/* Unified add-bot picker (Python or LLM from the user's library) */}
+              <div className="mb-4 p-3 bg-gray-900 rounded border border-gray-700">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold">Add a bot from your library</span>
+                  <Link
+                    to="/tinker"
+                    className="text-xs text-purple-300 hover:text-purple-200 underline"
                   >
-                    Add LLM Bot
-                  </button>
+                    Manage bots →
+                  </Link>
                 </div>
+                {botLibrary.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">
+                    No bots yet. Head to <Link to="/tinker" className="text-purple-300 underline">Tinker</Link> to create your first bot.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <select
+                      data-testid="add-bot-select"
+                      value={selectedBotId ?? ''}
+                      onChange={(e) => setSelectedBotId(Number(e.target.value))}
+                      className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm"
+                    >
+                      {botLibrary.map((bot) => (
+                        <option key={bot.id} value={bot.id}>
+                          [{bot.kind === 'llm' ? 'LLM' : 'PY'}] {bot.name}
+                          {bot.kind === 'llm' && bot.model_path
+                            ? ` — ${bot.model_path.replace(/^mlx-community\//, '')}`
+                            : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      data-testid="add-bot-button"
+                      onClick={handleAddBot}
+                      disabled={
+                        !selectedBotId ||
+                        lobbyState.members.length >= lobbyState.settings.max_players
+                      }
+                      className="px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded text-sm font-semibold disabled:bg-gray-600 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      Add to lobby
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Start Race Button */}
