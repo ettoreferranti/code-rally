@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import LobbyBrowser from './LobbyBrowser';
 
@@ -15,13 +16,18 @@ vi.mock('../hooks/useUsername', () => ({
   useUsername: () => ({ username: 'alice', loading: false }),
 }));
 
+const mockDisbandLobby = vi.fn<(lobbyId: string, playerId: string) => Promise<void>>(
+  async () => undefined,
+);
+
 vi.mock('../services', async () => {
-  // Stub fetch + create. Each test sets `mockedLobbies` before render.
+  // Stub fetch + create + disband. Each test sets `mockedLobbies`.
   return {
     fetchLobbies: vi.fn(async (status: string) => {
       return (globalThis as any).__mockedLobbies?.filter((l: any) => l.status === status) ?? [];
     }),
     createLobby: vi.fn(),
+    disbandLobby: (lobbyId: string, playerId: string) => mockDisbandLobby(lobbyId, playerId),
   };
 });
 
@@ -55,6 +61,7 @@ const baseLobby = (overrides: Partial<any> = {}) => ({
 describe('LobbyBrowser — join existing lobby (#168)', () => {
   beforeEach(() => {
     (globalThis as any).__mockedLobbies = [];
+    mockDisbandLobby.mockClear();
   });
 
   it('shows the creator name on every lobby card', async () => {
@@ -134,6 +141,71 @@ describe('LobbyBrowser — join existing lobby (#168)', () => {
 
     await waitFor(() => expect(screen.getByText('BobsRace')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /^Full$/i })).toBeInTheDocument();
+  });
+
+  it('shows a Delete button only on the user\'s own lobbies (#169)', async () => {
+    setLobbies([
+      baseLobby({
+        lobby_id: 'mine',
+        host_player_id: 'alice',
+        creator_player_id: 'alice',
+        name: 'AlicesRace',
+      }),
+      baseLobby({
+        lobby_id: 'theirs',
+        host_player_id: 'bob',
+        creator_player_id: 'bob',
+        name: 'BobsRace',
+      }),
+    ]);
+
+    renderBrowser();
+
+    await waitFor(() => expect(screen.getByText('AlicesRace')).toBeInTheDocument());
+    expect(screen.getByTestId('delete-lobby-mine')).toBeInTheDocument();
+    expect(screen.queryByTestId('delete-lobby-theirs')).toBeNull();
+  });
+
+  it('calls disbandLobby on Delete click after the user confirms (#169)', async () => {
+    setLobbies([
+      baseLobby({
+        lobby_id: 'mine',
+        host_player_id: 'alice',
+        creator_player_id: 'alice',
+        name: 'AlicesRace',
+      }),
+    ]);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    renderBrowser();
+
+    await waitFor(() => expect(screen.getByTestId('delete-lobby-mine')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('delete-lobby-mine'));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockDisbandLobby).toHaveBeenCalledWith('mine', 'alice');
+    confirmSpy.mockRestore();
+  });
+
+  it('does not call disbandLobby if the user cancels the confirm (#169)', async () => {
+    setLobbies([
+      baseLobby({
+        lobby_id: 'mine',
+        host_player_id: 'alice',
+        creator_player_id: 'alice',
+        name: 'AlicesRace',
+      }),
+    ]);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    renderBrowser();
+
+    await waitFor(() => expect(screen.getByTestId('delete-lobby-mine')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('delete-lobby-mine'));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockDisbandLobby).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it('shows only Spectate for racing lobbies (no Join)', async () => {

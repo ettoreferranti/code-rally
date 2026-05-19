@@ -351,7 +351,8 @@ class TestDisbandLobby:
         response = client.delete(f"/lobbies/{lobby_id}?player_id=player2")
 
         assert response.status_code == 403
-        assert "Only the host" in response.json()["detail"]
+        # Message updated when disband was opened up to creator-or-host (#169).
+        assert "host or creator" in response.json()["detail"]
 
     def test_disband_lobby_not_found(self, client):
         """Test disbanding non-existent lobby."""

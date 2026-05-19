@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchLobbies, createLobby, type LobbyListItem } from '../services';
+import { fetchLobbies, createLobby, disbandLobby, type LobbyListItem } from '../services';
 import { useUsername } from '../hooks/useUsername';
 
 const LobbyBrowser: React.FC = () => {
@@ -79,6 +79,21 @@ const LobbyBrowser: React.FC = () => {
 
   const handleJoinLobby = (lobbyId: string) => {
     navigate(`/lobby/${lobbyId}`);
+  };
+
+  const handleDeleteLobby = async (lobby: LobbyListItem) => {
+    if (!username) return;
+    const ok = window.confirm(
+      `Delete lobby "${lobby.name}"? This cannot be undone.`,
+    );
+    if (!ok) return;
+    setError(null);
+    try {
+      await disbandLobby(lobby.lobby_id, username);
+      await loadLobbies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete lobby');
+    }
   };
 
   const handleSpectateLobby = (lobby: LobbyListItem) => {
@@ -207,6 +222,16 @@ const LobbyBrowser: React.FC = () => {
                     >
                       Spectate
                     </button>
+                    {isOwnLobby && (
+                      <button
+                        data-testid={`delete-lobby-${lobby.lobby_id}`}
+                        onClick={() => handleDeleteLobby(lobby)}
+                        title="Delete this lobby"
+                        className="py-2 px-3 rounded font-semibold bg-red-700 hover:bg-red-600"
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </div>
                 </div>
               );

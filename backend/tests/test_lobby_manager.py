@@ -699,6 +699,24 @@ class TestLobbyManager:
         retrieved = manager.get_lobby(lobby.lobby_id)
         assert retrieved is None
 
+    def test_disband_by_creator_even_when_host_is_someone_else(self, manager):
+        """The creator can disband their lobby straight from the listing
+        (no need to rejoin first) even if host has transferred elsewhere.
+        Covers the user's main motivation for #169: cleaning up empty /
+        bot-host lobbies without having to enter each one.
+        """
+        lobby = manager.create_lobby("Test Lobby", "alice")
+        manager.join_lobby(lobby.lobby_id, "bob")
+        manager.leave_lobby(lobby.lobby_id, "alice")
+        # Host transferred to bob; alice is still the creator.
+        retrieved = manager.get_lobby(lobby.lobby_id)
+        assert retrieved.host_player_id == "bob"
+        assert retrieved.creator_player_id == "alice"
+
+        # alice disbands without rejoining.
+        assert manager.disband_lobby(lobby.lobby_id, "alice") is True
+        assert manager.get_lobby(lobby.lobby_id) is None
+
     def test_disband_lobby_by_non_host(self, manager):
         """Test non-host trying to disband lobby."""
         lobby = manager.create_lobby("Test Lobby", "player1")

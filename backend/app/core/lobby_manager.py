@@ -512,23 +512,32 @@ class LobbyManager:
 
     def disband_lobby(self, lobby_id: str, player_id: str) -> bool:
         """
-        Disband lobby (host only).
+        Disband lobby. Permitted for the current host OR the creator.
 
-        Args:
-            lobby_id: Lobby to disband
-            player_id: Player attempting disband (must be host)
-
-        Returns:
-            True if successful, False otherwise
+        Allowing the creator covers the cleanup case in #169: from
+        /lobbies the user can delete their own lobby without entering it
+        first, even if a host transfer earlier had pointed host_player_id
+        at someone else (or, before today's fix, at a bot).
         """
         lobby = self._lobbies.get(lobby_id)
-        if not lobby or not lobby.is_host(player_id):
-            logger.warning(f"Player {player_id} tried to disband lobby {lobby_id} (not host or not found)")
+        if not lobby:
+            logger.warning(f"Player {player_id} tried to disband missing lobby {lobby_id}")
+            return False
+
+        is_host = lobby.is_host(player_id)
+        is_creator = lobby.creator_player_id == player_id
+        if not (is_host or is_creator):
+            logger.warning(
+                f"Player {player_id} tried to disband lobby {lobby_id} (not host or creator)"
+            )
             return False
 
         lobby.status = LobbyStatus.DISBANDED
         self._cleanup_lobby(lobby_id)
-        logger.info(f"Lobby {lobby_id} disbanded by host {player_id}")
+        logger.info(
+            f"Lobby {lobby_id} disbanded by {player_id} "
+            f"(host={is_host}, creator={is_creator})"
+        )
         return True
 
     def _cleanup_lobby(self, lobby_id: str) -> None:

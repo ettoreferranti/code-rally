@@ -336,8 +336,11 @@ async def disband_lobby(
     success = manager.disband_lobby(lobby_id, player_id)
 
     if not success:
-        if not lobby.is_host(player_id):
-            raise HTTPException(status_code=403, detail="Only the host can disband the lobby")
+        if not (lobby.is_host(player_id) or lobby.creator_player_id == player_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the lobby's host or creator can disband it",
+            )
         else:
             raise HTTPException(status_code=500, detail="Failed to disband lobby")
 
