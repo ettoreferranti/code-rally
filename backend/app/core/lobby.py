@@ -31,7 +31,14 @@ class LobbySettings:
 
 @dataclass
 class LobbyMember:
-    """Individual member in a lobby."""
+    """Individual member in a lobby.
+
+    For bot members (driver_kind ∈ {python_bot, llm_bot}), ``bot_id`` is
+    the DB row in the unified Bot table, and the kind-specific fields
+    (bot_code/bot_class_name for python, llm_model_path/llm_system_prompt
+    for llm) are denormalised at add-time so race-start doesn't have to
+    re-query the DB.
+    """
     player_id: str  # Unique player identifier
     username: Optional[str] = None  # Display name (if logged in)
     # Driver kind discriminator. "is_bot" stays True for both bot kinds for
@@ -39,11 +46,11 @@ class LobbyMember:
     # and the race-start dispatcher need.
     driver_kind: str = "human"  # "human" | "python_bot" | "llm_bot"
     is_bot: bool = False
-    bot_id: Optional[int] = None  # Database bot ID for python_bot members
-    bot_code: Optional[str] = None
-    bot_class_name: Optional[str] = None
-    # LLM-bot config. None → server default (mlx_runtime.DEFAULT_MODEL_PATH).
-    llm_model_path: Optional[str] = None
+    bot_id: Optional[int] = None  # Database bot ID (both python_bot and llm_bot)
+    bot_code: Optional[str] = None  # python_bot only
+    bot_class_name: Optional[str] = None  # python_bot only
+    llm_model_path: Optional[str] = None  # llm_bot only
+    llm_system_prompt: Optional[str] = None  # llm_bot only
     ready: bool = False  # Ready to start (future feature)
     connection_time: float = field(default_factory=time.time)
 

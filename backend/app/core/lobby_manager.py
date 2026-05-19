@@ -260,112 +260,102 @@ class LobbyManager:
     def add_bot_to_lobby(
         self,
         lobby_id: str,
+        *,
         bot_id: int,
-        bot_code: str,
-        bot_class_name: str,
-        owner_username: str
+        kind: str,
+        bot_name: str,
+        owner_username: str,
+        bot_code: Optional[str] = None,
+        bot_class_name: Optional[str] = None,
+        model_path: Optional[str] = None,
+        system_prompt: Optional[str] = None,
     ) -> Optional[str]:
         """
-        Add bot to lobby.
+        Add a bot (Python or LLM) from the user's library to a lobby.
+
+        Single entry point for both bot kinds; the caller (WS handler)
+        reads the bot row from the DB and forwards the kind-specific
+        fields here. MLX availability is checked eagerly for LLM bots
+        so the host sees an MLX-missing error before the race starts,
+        not at race start.
 
         Args:
-            lobby_id: Lobby to join
-            bot_id: Database bot ID
-            bot_code: Bot source code
-            bot_class_name: Bot class name
-            owner_username: Bot owner's username
+            lobby_id: Lobby to add the bot to.
+            bot_id: DB bot ID — used in the lobby player_id slug.
+            kind: 'python_bot' or 'llm_bot'.
+            bot_name: Display name of the bot (from the DB row).
+            owner_username: Bot owner's username — used in the slug.
+            bot_code: Source code (required for kind='python_bot').
+            bot_class_name: Resolved bot class name (kind='python_bot').
+            model_path: Model path (required for kind='llm_bot').
+            system_prompt: System prompt (required for kind='llm_bot').
 
         Returns:
-            Bot's player_id if successful, None otherwise
+            The bot's lobby player_id on success, else None.
         """
         lobby = self._lobbies.get(lobby_id)
         if not lobby or lobby.status != LobbyStatus.WAITING:
-            logger.warning(f"Cannot add bot to lobby {lobby_id} (not found or wrong status)")
+            logger.warning(
+                f"Cannot add bot to lobby {lobby_id} (not found or wrong status)"
+            )
             return None
 
         if lobby.is_full():
             logger.warning(f"Cannot add bot to full lobby {lobby_id}")
             return None
 
-        # Create unique bot player ID
-        bot_player_id = f"bot-{owner_username}-{bot_id}"
-
-        if bot_player_id in lobby.members:
-            logger.debug(f"Bot {bot_player_id} already in lobby {lobby_id}")
-            return None  # Bot already added
-
-        lobby.members[bot_player_id] = LobbyMember(
-            player_id=bot_player_id,
-            username=f"{owner_username}'s bot",
-            driver_kind="python_bot",
-            is_bot=True,
-            bot_id=bot_id,
-            bot_code=bot_code,
-            bot_class_name=bot_class_name,
-            ready=True  # Bots always ready
-        )
-        logger.info(f"Added bot {bot_player_id} to lobby {lobby_id}")
-        return bot_player_id
-
-    def add_llm_bot_to_lobby(
-        self,
-        lobby_id: str,
-        model_path: Optional[str] = None,
-    ) -> Optional[str]:
-        """
-        Add an LLM-driven bot to a lobby.
-
-        MLX availability is checked eagerly so the host sees a clear failure
-        immediately. The actual model load happens at race start, inside
-        ``engine.add_llm_player``, when MLXRuntime is constructed for the
-        requested model_path.
-
-        Args:
-            lobby_id: Lobby to add the LLM bot to.
-            model_path: Optional HuggingFace/local model path. None → server
-                default model (mlx_runtime.DEFAULT_MODEL_PATH).
-
-        Returns:
-            The LLM bot's player_id on success, else None (lobby not found,
-            wrong status, full, or MLX missing).
-        """
-        from app.agents import mlx_runtime
-
-        lobby = self._lobbies.get(lobby_id)
-        if not lobby or lobby.status != LobbyStatus.WAITING:
-            logger.warning(
-                f"Cannot add LLM bot to lobby {lobby_id} (not found or wrong status)"
+        if kind == "python_bot":
+            if not bot_code or not bot_class_name:
+                logger.warning("python_bot requires bot_code and bot_class_name")
+                return None
+            bot_player_id = f"bot-{owner_username}-{bot_id}"
+            if bot_player_id in lobby.members:
+                logger.debug(f"Bot {bot_player_id} already in lobby {lobby_id}")
+                return None  # Bot already added
+            lobby.members[bot_player_id] = LobbyMember(
+                player_id=bot_player_id,
+                username=f"{owner_username}/{bot_name}",
+                driver_kind="python_bot",
+                is_bot=True,
+                bot_id=bot_id,
+                bot_code=bot_code,
+                bot_class_name=bot_class_name,
+                ready=True,
             )
-            return None
+            logger.info(f"Added python bot {bot_player_id} to lobby {lobby_id}")
+            return bot_player_id
 
-        if lobby.is_full():
-            logger.warning(f"Cannot add LLM bot to full lobby {lobby_id}")
-            return None
-
-        if not mlx_runtime.is_available():
-            logger.warning(
-                f"Cannot add LLM bot to lobby {lobby_id}: MLX is not installed"
+        if kind == "llm_bot":
+            from app.agents import mlx_runtime
+            if not model_path or not system_prompt:
+                logger.warning("llm_bot requires model_path and system_prompt")
+                return None
+            if not mlx_runtime.is_available():
+                logger.warning(
+                    f"Cannot add LLM bot to lobby {lobby_id}: MLX is not installed"
+                )
+                return None
+            llm_player_id = f"llm-{owner_username}-{bot_id}"
+            if llm_player_id in lobby.members:
+                logger.debug(f"LLM bot {llm_player_id} already in lobby {lobby_id}")
+                return None
+            lobby.members[llm_player_id] = LobbyMember(
+                player_id=llm_player_id,
+                username=f"{owner_username}/{bot_name}",
+                driver_kind="llm_bot",
+                is_bot=True,
+                bot_id=bot_id,
+                llm_model_path=model_path,
+                llm_system_prompt=system_prompt,
+                ready=True,
             )
-            return None
+            logger.info(
+                f"Added LLM bot {llm_player_id} (model={model_path}) to lobby {lobby_id}"
+            )
+            return llm_player_id
 
-        # Generate a unique player_id within this lobby.
-        existing = sum(
-            1 for m in lobby.members.values() if m.driver_kind == "llm_bot"
-        )
-        llm_player_id = f"llm-bot-{existing + 1}-{lobby_id[:8]}"
-
-        lobby.members[llm_player_id] = LobbyMember(
-            player_id=llm_player_id,
-            username=f"LLM Bot {existing + 1}",
-            driver_kind="llm_bot",
-            is_bot=True,
-            llm_model_path=model_path,
-            ready=True,  # LLM bots are always ready
-        )
-        logger.info(
-            f"Added LLM bot {llm_player_id} (model={model_path or 'default'}) to lobby {lobby_id}"
-        )
-        return llm_player_id
+        logger.warning(f"Unknown bot kind {kind!r} for lobby {lobby_id}")
+        return None
 
     def update_settings(
         self,

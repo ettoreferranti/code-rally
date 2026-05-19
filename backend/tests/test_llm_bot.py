@@ -480,9 +480,14 @@ class TestEngineLLMIntegration:
 
         manager = LobbyManager()
         lobby = manager.create_lobby("Race", "host_player")
-        llm_player_id = manager.add_llm_bot_to_lobby(
+        llm_player_id = manager.add_bot_to_lobby(
             lobby_id=lobby.lobby_id,
+            bot_id=42,
+            kind="llm_bot",
+            bot_name="MyLLM",
+            owner_username="host_player",
             model_path="mlx-community/Qwen2.5-7B-Instruct-4bit",
+            system_prompt="prompt",
         )
         assert llm_player_id is not None
 

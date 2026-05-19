@@ -353,6 +353,9 @@ def serialize_lobby_state(lobby) -> dict:
                 'bot_id': member.bot_id,
                 'ready': member.ready,
                 'llm_model_path': member.llm_model_path,
+                # llm_system_prompt deliberately omitted from the payload —
+                # it can be long and the roster doesn't need it. Frontend
+                # can fetch the bot row from /bots/{id} if needed.
             }
             for member in lobby.members.values()
         ],
@@ -459,9 +462,16 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
     for member in lobby.members.values():
         if member.driver_kind == "llm_bot":
             try:
+                # Pass the bot's stored system_prompt through to the
+                # strategist so every LLM bot races with its own
+                # personality (or the default if none was customised).
+                strategist_kwargs = {}
+                if member.llm_system_prompt is not None:
+                    strategist_kwargs["system_prompt"] = member.llm_system_prompt
                 engine.add_llm_player(
                     member.player_id,
                     model_path=member.llm_model_path,
+                    strategist_kwargs=strategist_kwargs or None,
                 )
             except BotError as e:
                 logger.error(f"Failed to add LLM bot {member.player_id} to race: {e}")
@@ -545,17 +555,14 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
 
 async def handle_add_bot_to_lobby(lobby_id: str, player_id: str, bot_id: int, websocket: WebSocket) -> None:
     """
-    Handle adding a bot to lobby.
+    Add a bot (Python or LLM) from the user's library to a lobby.
 
-    Args:
-        lobby_id: Lobby identifier
-        player_id: Player adding bot (for ownership check)
-        bot_id: Database bot ID
-        websocket: WebSocket connection
+    Reads the bot row from the DB, dispatches by ``bot.kind`` into the
+    unified ``LobbyManager.add_bot_to_lobby``. Surfaces MLX-missing and
+    other kind-specific errors with helpful messages.
     """
     lobby_manager = get_lobby_manager()
 
-    # Fetch bot from database
     db = SessionLocal()
     try:
         bot = bot_service.get_bot_by_id(db, bot_id)
@@ -566,32 +573,62 @@ async def handle_add_bot_to_lobby(lobby_id: str, player_id: str, bot_id: int, we
             })
             return
 
-        # Extract class name
-        bot_class_name = bot_service.extract_class_name(bot.code)
-        if not bot_class_name:
+        owner_username = bot.owner.username
+
+        if bot.kind == "python_bot" or bot.kind == "python":
+            bot_class_name = bot_service.extract_class_name(bot.code)
+            if not bot_class_name:
+                await websocket.send_json({
+                    'type': 'error',
+                    'data': {'message': 'No bot class found in code'}
+                })
+                return
+            lobby_player_id = lobby_manager.add_bot_to_lobby(
+                lobby_id=lobby_id,
+                bot_id=bot_id,
+                kind="python_bot",
+                bot_name=bot.name,
+                owner_username=owner_username,
+                bot_code=bot.code,
+                bot_class_name=bot_class_name,
+            )
+        elif bot.kind == "llm" or bot.kind == "llm_bot":
+            lobby_player_id = lobby_manager.add_bot_to_lobby(
+                lobby_id=lobby_id,
+                bot_id=bot_id,
+                kind="llm_bot",
+                bot_name=bot.name,
+                owner_username=owner_username,
+                model_path=bot.model_path,
+                system_prompt=bot.system_prompt,
+            )
+        else:
             await websocket.send_json({
                 'type': 'error',
-                'data': {'message': 'No bot class found in code'}
+                'data': {'message': f'Unknown bot kind: {bot.kind!r}'}
             })
             return
 
-        # Add bot to lobby
-        bot_player_id = lobby_manager.add_bot_to_lobby(
-            lobby_id=lobby_id,
-            bot_id=bot_id,
-            bot_code=bot.code,
-            bot_class_name=bot_class_name,
-            owner_username=bot.owner.username
-        )
-
-        if not bot_player_id:
+        if not lobby_player_id:
+            # Distinguish MLX-missing for the host-facing error.
+            if bot.kind in ("llm", "llm_bot"):
+                from app.agents import mlx_runtime
+                if not mlx_runtime.is_available():
+                    message = (
+                        'MLX is not installed on the server. Install '
+                        'backend/requirements-agents.txt to enable LLM bots '
+                        '(Apple Silicon only).'
+                    )
+                else:
+                    message = 'Failed to add LLM bot (lobby full, wrong status, or already added)'
+            else:
+                message = 'Failed to add bot (lobby full, wrong status, or already added)'
             await websocket.send_json({
                 'type': 'error',
-                'data': {'message': 'Failed to add bot (lobby full, wrong status, or bot already added)'}
+                'data': {'message': message}
             })
             return
 
-        # Broadcast updated lobby state
         lobby = lobby_manager.get_lobby(lobby_id)
         await broadcast_to_lobby(lobby_id, {
             'type': 'lobby_state',
@@ -600,63 +637,6 @@ async def handle_add_bot_to_lobby(lobby_id: str, player_id: str, bot_id: int, we
 
     finally:
         db.close()
-
-
-async def handle_add_llm_bot_to_lobby(
-    lobby_id: str,
-    player_id: str,
-    model_path: Optional[str],
-    websocket: WebSocket,
-) -> None:
-    """
-    Handle adding an LLM-driven bot to a lobby (host-only).
-
-    Surfaces MLX-not-installed as a clear error so the host knows to
-    install the optional MLX dependency before adding LLM agents.
-    """
-    lobby_manager = get_lobby_manager()
-    lobby = lobby_manager.get_lobby(lobby_id)
-
-    if lobby is None:
-        await websocket.send_json({
-            'type': 'error',
-            'data': {'message': 'Lobby not found'}
-        })
-        return
-
-    if not lobby.is_host(player_id):
-        await websocket.send_json({
-            'type': 'error',
-            'data': {'message': 'Only the host can add LLM bots'}
-        })
-        return
-
-    llm_player_id = lobby_manager.add_llm_bot_to_lobby(
-        lobby_id=lobby_id,
-        model_path=model_path,
-    )
-    if llm_player_id is None:
-        # Distinguish the MLX-missing case so the UI can show a helpful message.
-        from app.agents import mlx_runtime
-        if not mlx_runtime.is_available():
-            message = (
-                'MLX is not installed on the server. Install '
-                'backend/requirements-agents.txt to enable LLM bots '
-                '(Apple Silicon only).'
-            )
-        else:
-            message = 'Failed to add LLM bot (lobby full or wrong status)'
-        await websocket.send_json({
-            'type': 'error',
-            'data': {'message': message}
-        })
-        return
-
-    lobby = lobby_manager.get_lobby(lobby_id)
-    await broadcast_to_lobby(lobby_id, {
-        'type': 'lobby_state',
-        'data': serialize_lobby_state(lobby)
-    })
 
 
 async def handle_spectate_lobby(lobby_id: str, player_id: str, username: Optional[str], websocket: WebSocket) -> None:
@@ -1014,16 +994,9 @@ async def game_websocket(
                 await handle_lobby_start_race(lobby_id, player_id, websocket)
 
             elif message['type'] == 'add_bot_to_lobby':
-                # Add bot to lobby
-                bot_id = message['data'].get('bot_id')
+                # Unified add-bot: backend reads bot.kind from DB and dispatches.
+                bot_id = (message.get('data') or {}).get('bot_id')
                 await handle_add_bot_to_lobby(lobby_id, player_id, bot_id, websocket)
-
-            elif message['type'] == 'add_llm_bot_to_lobby':
-                # Add LLM-driven bot to lobby (host only)
-                model_path = (message.get('data') or {}).get('model_path')
-                await handle_add_llm_bot_to_lobby(
-                    lobby_id, player_id, model_path, websocket
-                )
 
             # Game input messages
             elif message['type'] == 'input':
@@ -1048,70 +1021,9 @@ async def game_websocket(
                 if engine:
                     engine.start_race()
 
-            elif message['type'] == 'submit_bot' and not is_lobby_mode:
-                # Submit a bot to the race (direct mode only)
-                if not engine:
-                    continue
-
-                bot_id = message['data'].get('bot_id')
-
-                # Validate race status
-                if engine.state.race_info.status not in [RaceStatus.WAITING, RaceStatus.RACING]:
-                    await websocket.send_json({
-                        'type': 'bot_submission_response',
-                        'data': {'success': False, 'error': 'Invalid race status'}
-                    })
-                    continue
-
-                # Fetch bot from database
-                db = SessionLocal()
-                try:
-                    bot = bot_service.get_bot_by_id(db, bot_id)
-                    if not bot:
-                        await websocket.send_json({
-                            'type': 'bot_submission_response',
-                            'data': {'success': False, 'error': 'Bot not found'}
-                        })
-                        continue
-
-                    # Extract class name
-                    bot_class_name = bot_service.extract_class_name(bot.code)
-                    if not bot_class_name:
-                        await websocket.send_json({
-                            'type': 'bot_submission_response',
-                            'data': {'success': False, 'error': 'No bot class found'}
-                        })
-                        continue
-
-                    # Create unique bot player ID
-                    bot_player_id = f"bot-{bot.owner.username}-{bot.name}"
-
-                    # Check if already in race
-                    if bot_player_id in engine.state.players:
-                        await websocket.send_json({
-                            'type': 'bot_submission_response',
-                            'data': {'success': False, 'error': 'Bot already in race'}
-                        })
-                        continue
-
-                    # Add bot player
-                    try:
-                        engine.add_bot_player(bot_player_id, bot.code, bot_class_name)
-                        await websocket.send_json({
-                            'type': 'bot_submission_response',
-                            'data': {
-                                'success': True,
-                                'bot_player_id': bot_player_id,
-                                'bot_name': bot.name
-                            }
-                        })
-                    except BotError as e:
-                        await websocket.send_json({
-                            'type': 'bot_submission_response',
-                            'data': {'success': False, 'error': str(e)}
-                        })
-                finally:
-                    db.close()
+            # Mid-race `submit_bot` was removed in the Tinker / unified
+            # lobby cleanup. All bots are now added pre-race via
+            # `add_bot_to_lobby` while the lobby is still WAITING.
 
     except (WebSocketDisconnect, Exception) as e:
         # Handle disconnect cleanup

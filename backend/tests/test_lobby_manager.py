@@ -298,17 +298,41 @@ class TestLobbyManager:
         result = manager.leave_lobby(lobby.lobby_id, "player2")
         assert result is False
 
+    def _add_python_bot(self, manager, lobby_id, *, bot_id=42, name="MyBot",
+                         code="class Bot: pass", class_name="Bot", owner="Alice"):
+        """Helper for the unified add_bot_to_lobby Python-bot path."""
+        return manager.add_bot_to_lobby(
+            lobby_id=lobby_id,
+            bot_id=bot_id,
+            kind="python_bot",
+            bot_name=name,
+            owner_username=owner,
+            bot_code=code,
+            bot_class_name=class_name,
+        )
+
+    def _add_llm_bot(self, manager, lobby_id, *, bot_id=99, name="MyLLM",
+                      model_path="mlx-community/x", system_prompt="prompt",
+                      owner="Alice"):
+        """Helper for the unified add_bot_to_lobby LLM-bot path."""
+        return manager.add_bot_to_lobby(
+            lobby_id=lobby_id,
+            bot_id=bot_id,
+            kind="llm_bot",
+            bot_name=name,
+            owner_username=owner,
+            model_path=model_path,
+            system_prompt=system_prompt,
+        )
+
     def test_add_bot_to_lobby(self, manager):
-        """Test adding a bot to a lobby."""
+        """Test adding a Python bot via the unified add_bot_to_lobby."""
         lobby = manager.create_lobby("Test Lobby", "player1")
 
         bot_code = "class MyBot:\n    def on_tick(self, state):\n        return {'accelerate': True}"
-        bot_player_id = manager.add_bot_to_lobby(
-            lobby_id=lobby.lobby_id,
-            bot_id=42,
-            bot_code=bot_code,
-            bot_class_name="MyBot",
-            owner_username="Alice"
+        bot_player_id = self._add_python_bot(
+            manager, lobby.lobby_id, bot_id=42, name="MyBot",
+            code=bot_code, class_name="MyBot",
         )
 
         assert bot_player_id is not None
@@ -320,7 +344,7 @@ class TestLobbyManager:
         assert retrieved.members[bot_player_id].is_bot is True
         assert retrieved.members[bot_player_id].bot_id == 42
         assert retrieved.members[bot_player_id].bot_code == bot_code
-        assert retrieved.members[bot_player_id].ready is True  # Bots auto-ready
+        assert retrieved.members[bot_player_id].ready is True
 
     def test_add_bot_to_full_lobby(self, manager):
         """Test adding bot to full lobby."""
@@ -328,40 +352,16 @@ class TestLobbyManager:
         lobby = manager.create_lobby("Full Lobby", "player1", settings)
         manager.join_lobby(lobby.lobby_id, "player2")
 
-        # Try to add bot when full
-        result = manager.add_bot_to_lobby(
-            lobby_id=lobby.lobby_id,
-            bot_id=42,
-            bot_code="code",
-            bot_class_name="Bot",
-            owner_username="Alice"
-        )
-
+        result = self._add_python_bot(manager, lobby.lobby_id)
         assert result is None
 
     def test_add_duplicate_bot(self, manager):
-        """Test adding same bot twice."""
+        """Adding the same bot id twice is rejected."""
         lobby = manager.create_lobby("Test Lobby", "player1")
-
-        # Add bot first time
-        bot_player_id = manager.add_bot_to_lobby(
-            lobby_id=lobby.lobby_id,
-            bot_id=42,
-            bot_code="code",
-            bot_class_name="Bot",
-            owner_username="Alice"
-        )
-        assert bot_player_id is not None
-
-        # Try to add same bot again
-        result = manager.add_bot_to_lobby(
-            lobby_id=lobby.lobby_id,
-            bot_id=42,
-            bot_code="code",
-            bot_class_name="Bot",
-            owner_username="Alice"
-        )
-        assert result is None  # Already added
+        first = self._add_python_bot(manager, lobby.lobby_id, bot_id=42)
+        assert first is not None
+        again = self._add_python_bot(manager, lobby.lobby_id, bot_id=42)
+        assert again is None
 
     def test_lobby_member_default_driver_kind_is_human(self):
         """driver_kind defaults to 'human' so existing call-sites stay valid."""
@@ -371,45 +371,39 @@ class TestLobbyManager:
     def test_python_bot_added_via_add_bot_marks_driver_kind(self, manager):
         """add_bot_to_lobby sets driver_kind='python_bot' and keeps is_bot=True."""
         lobby = manager.create_lobby("Test Lobby", "player1")
-        bot_player_id = manager.add_bot_to_lobby(
-            lobby_id=lobby.lobby_id,
-            bot_id=42,
-            bot_code="class Bot: pass",
-            bot_class_name="Bot",
-            owner_username="Alice",
-        )
+        bot_player_id = self._add_python_bot(manager, lobby.lobby_id)
         member = manager.get_lobby(lobby.lobby_id).members[bot_player_id]
         assert member.driver_kind == "python_bot"
         assert member.is_bot is True
 
     def test_add_llm_bot_to_lobby(self, manager, monkeypatch):
-        """add_llm_bot_to_lobby creates a member with driver_kind='llm_bot'."""
+        """LLM path of unified add_bot_to_lobby produces driver_kind='llm_bot'."""
         from app.agents import mlx_runtime
         monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
 
         lobby = manager.create_lobby("Test Lobby", "player1")
-        llm_player_id = manager.add_llm_bot_to_lobby(lobby_id=lobby.lobby_id)
+        llm_player_id = self._add_llm_bot(manager, lobby.lobby_id)
 
         assert llm_player_id is not None
         member = manager.get_lobby(lobby.lobby_id).members[llm_player_id]
         assert member.driver_kind == "llm_bot"
         assert member.is_bot is True
-        assert member.ready is True  # LLM bots are always ready
-        assert member.llm_model_path is None  # default model
+        assert member.ready is True
 
-    def test_add_llm_bot_stores_model_path(self, manager, monkeypatch):
-        """A configured model_path is preserved on the member."""
+    def test_add_llm_bot_stores_model_path_and_prompt(self, manager, monkeypatch):
         from app.agents import mlx_runtime
         monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
 
         lobby = manager.create_lobby("Test Lobby", "player1")
-        llm_player_id = manager.add_llm_bot_to_lobby(
-            lobby_id=lobby.lobby_id,
+        llm_player_id = self._add_llm_bot(
+            manager, lobby.lobby_id,
             model_path="mlx-community/Qwen2.5-7B-Instruct-4bit",
+            system_prompt="Drive carefully.",
         )
 
         member = manager.get_lobby(lobby.lobby_id).members[llm_player_id]
         assert member.llm_model_path == "mlx-community/Qwen2.5-7B-Instruct-4bit"
+        assert member.llm_system_prompt == "Drive carefully."
 
     def test_add_llm_bot_rejected_when_mlx_unavailable(self, manager, monkeypatch):
         """Eager MLX check refuses the add cleanly when the dependency is missing."""
@@ -417,10 +411,9 @@ class TestLobbyManager:
         monkeypatch.setattr(mlx_runtime, "is_available", lambda: False)
 
         lobby = manager.create_lobby("Test Lobby", "player1")
-        result = manager.add_llm_bot_to_lobby(lobby_id=lobby.lobby_id)
+        result = self._add_llm_bot(manager, lobby.lobby_id)
 
         assert result is None
-        # Lobby still has only the host.
         assert len(manager.get_lobby(lobby.lobby_id).members) == 1
 
     def test_add_llm_bot_rejected_when_lobby_full(self, manager, monkeypatch):
@@ -430,7 +423,7 @@ class TestLobbyManager:
         settings = LobbySettings(max_players=1)
         lobby = manager.create_lobby("Test Lobby", "player1", settings)
 
-        result = manager.add_llm_bot_to_lobby(lobby_id=lobby.lobby_id)
+        result = self._add_llm_bot(manager, lobby.lobby_id)
         assert result is None
 
     def test_update_settings_by_host(self, manager):
@@ -594,9 +587,11 @@ class TestLobbyManager:
         bot_id = manager.add_bot_to_lobby(
             lobby_id=lobby.lobby_id,
             bot_id=42,
+            kind="python_bot",
+            bot_name="Bot",
+            owner_username="Alice",
             bot_code="code",
             bot_class_name="Bot",
-            owner_username="Alice"
         )
         lobby.status = LobbyStatus.FINISHED
 
