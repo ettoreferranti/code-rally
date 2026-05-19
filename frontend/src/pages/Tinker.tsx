@@ -73,6 +73,8 @@ export default function Tinker() {
   const [newName, setNewName] = useState('');
   const [pythonTemplates, setPythonTemplates] = useState<TemplateInfo[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  // Template code is fetched on Load and held here until Create or Cancel.
+  const [loadedTemplate, setLoadedTemplate] = useState<{ name: string; code: string } | null>(null);
   const [modelPresets, setModelPresets] = useState<ModelPreset[]>([]);
   const [newLlmModel, setNewLlmModel] = useState('');
   const [newLlmCustomMode, setNewLlmCustomMode] = useState(false);
@@ -194,12 +196,13 @@ export default function Tinker() {
 
   const handleLoadTemplate = async () => {
     if (!selectedTemplate) return;
+    setError(null);
     try {
       const tpl = await getTemplate(selectedTemplate);
-      // Don't override the bot name field if user has typed one.
+      setLoadedTemplate({ name: tpl.name, code: tpl.code });
+      // Suggest the template's name as the bot name, but don't override
+      // what the user has typed.
       if (!newName.trim()) setNewName(tpl.name);
-      // Stash code for the create step.
-      (handleLoadTemplate as any)._code = tpl.code;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load template');
     }
@@ -214,16 +217,15 @@ export default function Tinker() {
     setLoading(true);
     setError(null);
     try {
-      const templateCode = (handleLoadTemplate as any)._code as string | undefined;
       const bot = await createBot(username, {
         name: newName.trim(),
         kind: 'python',
-        code: templateCode ?? DEFAULT_BOT_CODE,
+        code: loadedTemplate?.code ?? DEFAULT_BOT_CODE,
       });
       setAddDialog(null);
       setNewName('');
       setSelectedTemplate('');
-      (handleLoadTemplate as any)._code = undefined;
+      setLoadedTemplate(null);
       await refreshBotList();
       await handleSelectBot(bot.id);
     } catch (err) {
@@ -496,7 +498,12 @@ export default function Tinker() {
                   <div className="flex gap-2">
                     <select
                       value={selectedTemplate}
-                      onChange={(e) => setSelectedTemplate(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedTemplate(e.target.value);
+                        // A new template choice invalidates a previously-
+                        // loaded one until the user clicks Load again.
+                        if (loadedTemplate) setLoadedTemplate(null);
+                      }}
                       className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm"
                     >
                       <option value="">— blank —</option>
@@ -506,15 +513,33 @@ export default function Tinker() {
                     </select>
                     <button
                       onClick={handleLoadTemplate}
-                      disabled={!selectedTemplate}
+                      disabled={!selectedTemplate || loadedTemplate?.name === pythonTemplates.find((t) => t.id === selectedTemplate)?.name}
                       className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm disabled:opacity-50"
                     >
                       Load
                     </button>
                   </div>
+                  {loadedTemplate ? (
+                    <p className="mt-2 text-xs text-green-300">
+                      ✓ Loaded <strong>{loadedTemplate.name}</strong> ({loadedTemplate.code.length} chars). It will be saved as the bot's starting code.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Pick a template and click Load. The bot will be created with that template's code; you can edit it after.
+                    </p>
+                  )}
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button onClick={() => setAddDialog(null)} className="px-3 py-1 text-gray-400 hover:text-white">Cancel</button>
+                  <button
+                    onClick={() => {
+                      setAddDialog(null);
+                      setSelectedTemplate('');
+                      setLoadedTemplate(null);
+                    }}
+                    className="px-3 py-1 text-gray-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
                   <button
                     onClick={handleCreatePython}
                     disabled={loading || !newName.trim()}
