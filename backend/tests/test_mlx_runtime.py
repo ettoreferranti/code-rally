@@ -53,6 +53,59 @@ async def test_real_mlx_call_returns_parseable_intent():
 
 
 @pytest.mark.asyncio
+async def test_generate_pins_to_single_thread(monkeypatch):
+    """All generate calls on a given MLXRuntime must run on the same OS
+    thread. Metal's command-buffer lifecycle isn't safe across the
+    asyncio default thread pool's worker threads — that's #167.
+
+    Stub the inner _generate to capture the thread identity for each
+    call, fire several concurrent + serial generates, assert one thread.
+    """
+    import threading
+
+    seen_threads = []
+
+    def stub_inner_generate(model, tokenizer, prompt, max_tokens, verbose):
+        seen_threads.append(threading.get_ident())
+        time.sleep(0.01)
+        return "ok"
+
+    def stub_init(self, model_path=mlx_runtime.DEFAULT_MODEL_PATH, max_tokens=64):
+        self._model = None
+        self._tokenizer = None
+        self._generate = stub_inner_generate
+        self._max_tokens = max_tokens
+        # Single-thread executor is owned by the runtime — see __init__
+        # in production. Mimic the same here.
+        import concurrent.futures
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mlx-runtime-test"
+        )
+
+    monkeypatch.setattr(MLXRuntime, "__init__", stub_init)
+
+    runtime = MLXRuntime()
+
+    # Serial: three back-to-back calls.
+    await runtime.generate("p1")
+    await runtime.generate("p2")
+    await runtime.generate("p3")
+
+    # Concurrent: gather four more in parallel.
+    await asyncio.gather(
+        runtime.generate("a"),
+        runtime.generate("b"),
+        runtime.generate("c"),
+        runtime.generate("d"),
+    )
+
+    assert len(seen_threads) == 7
+    assert len(set(seen_threads)) == 1, (
+        f"All generate calls must run on one thread; saw {set(seen_threads)}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_generate_serializes_concurrent_calls(monkeypatch):
     """Two concurrent generate() calls on the same MLXRuntime must NOT
     run their inner mlx-lm call in parallel.
@@ -84,8 +137,10 @@ async def test_generate_serializes_concurrent_calls(monkeypatch):
         self._tokenizer = None
         self._generate = stub_inner_generate
         self._max_tokens = max_tokens
-        # The lock is what we're proving exists.
-        self._gen_lock = asyncio.Lock()
+        import concurrent.futures
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mlx-runtime-test"
+        )
 
     monkeypatch.setattr(MLXRuntime, "__init__", stub_init)
 

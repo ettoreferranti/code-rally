@@ -12,6 +12,7 @@ mlx-community hub). Override with the MLX_MODEL_PATH env var.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 from typing import Dict, Optional
@@ -49,28 +50,38 @@ class MLXRuntime:
         self._model, self._tokenizer = load(model_path)
         self._generate = generate
         self._max_tokens = max_tokens
-        # Serialize concurrent generate() callers: Metal command-buffer
-        # encoding against a single loaded model is not thread-safe.
-        # Without this, two LLM bots sharing a cached runtime collide
-        # mid-race with a Metal assertion (#163).
-        self._gen_lock = asyncio.Lock()
+        # All inference on this runtime runs on a single dedicated worker
+        # thread. Two reasons (#163, #167):
+        #   1. The executor's `max_workers=1` queue naturally serialises
+        #      concurrent callers, so we don't need a separate asyncio.Lock.
+        #   2. Metal command-buffer state is tied to thread identity for
+        #      some operations; consecutive `asyncio.to_thread(...)` calls
+        #      would bounce between pool threads and trip Metal asserts.
+        #      Pinning to one thread keeps the GPU context consistent.
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix=f"mlx-runtime[{model_path}]",
+        )
         logger.info("MLX model loaded")
 
     async def generate(self, prompt: str) -> str:
         """Async wrapper around the synchronous mlx-lm generate call.
 
-        Holds a per-runtime lock so two concurrent callers queue rather
-        than racing into Metal at the same time.
+        Routes through the runtime's dedicated single-worker executor so
+        every generate runs on the same OS thread and concurrent callers
+        queue up (no separate lock needed).
         """
-        async with self._gen_lock:
-            return await asyncio.to_thread(
-                self._generate,
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            lambda: self._generate(
                 self._model,
                 self._tokenizer,
                 prompt=prompt,
                 max_tokens=self._max_tokens,
                 verbose=False,
-            )
+            ),
+        )
 
 
 def get_runtime(model_path: Optional[str] = None) -> MLXRuntime:
