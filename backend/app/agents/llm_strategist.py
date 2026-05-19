@@ -35,7 +35,7 @@ GenerateFn = Callable[[str], Awaitable[str]]
 _MIN_TARGET_SPEED_KMH = 30.0
 
 
-_SYSTEM_PROMPT = (
+DEFAULT_SYSTEM_PROMPT = (
     "You are a rally driver racing to finish the stage AS FAST AS POSSIBLE. "
     "Top speed is around 180 km/h. Wet, gravel, and ice surfaces reduce "
     "grip but you still race — pick a safer speed and a wider racing line, "
@@ -57,10 +57,17 @@ _SYSTEM_PROMPT = (
 )
 
 
-def build_prompt(observation: str) -> str:
-    """Assemble the full prompt sent to the generation backend."""
+def build_prompt(observation: str, system_prompt: Optional[str] = None) -> str:
+    """Assemble the full prompt sent to the generation backend.
+
+    Args:
+        observation: The formatted observation string for this tick.
+        system_prompt: Optional per-bot system-prompt override (Tinker
+            UI lets users edit this). Defaults to ``DEFAULT_SYSTEM_PROMPT``.
+    """
+    base = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
     return (
-        f"{_SYSTEM_PROMPT}\n\n"
+        f"{base}\n\n"
         f"Observation:\n{observation}\n\n"
         f"Intent JSON:"
     )
@@ -76,6 +83,9 @@ class LLMStrategist:
             without loading a real model.
         tick_interval_s: how often the background loop calls generate_fn.
         timeout_s: per-call timeout. Timeouts are dropped, not raised.
+        system_prompt: optional per-bot system prompt. None → use
+            ``DEFAULT_SYSTEM_PROMPT``. Set by the Tinker UI when the LLM
+            bot stored its own prompt.
     """
 
     def __init__(
@@ -83,10 +93,12 @@ class LLMStrategist:
         generate_fn: GenerateFn,
         tick_interval_s: float = 1.0,
         timeout_s: float = 2.0,
+        system_prompt: Optional[str] = None,
     ) -> None:
         self._generate_fn = generate_fn
         self._tick_interval_s = tick_interval_s
         self._timeout_s = timeout_s
+        self._system_prompt = system_prompt
         self._latest_observation: Optional[str] = None
         self._latest_intent: Optional[Intent] = None
         # Server-side Unix timestamp of when `_latest_intent` was produced.
@@ -124,7 +136,7 @@ class LLMStrategist:
 
         try:
             raw = await asyncio.wait_for(
-                self._generate_fn(build_prompt(observation)),
+                self._generate_fn(build_prompt(observation, self._system_prompt)),
                 timeout=self._timeout_s,
             )
         except asyncio.TimeoutError:
