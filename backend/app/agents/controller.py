@@ -40,7 +40,12 @@ from app.bot_runtime.types import BotGameState
 logger = logging.getLogger(__name__)
 
 
-_MS_TO_KMH = 3.6
+# Conversion from engine speed (units/s) to displayed km/h.
+# MUST match `frontend/src/components/RaceHUD.tsx` so the LLM and the
+# user see the same number on the speedometer (#166). The engine's
+# MAX_SPEED is 300 units/s; with this factor that maps to ~180 km/h
+# (rally-car top speed).
+_UNITS_TO_KMH = 0.6
 # Diagnostic logging cadence: emit one info line per ~N controller ticks.
 # At the engine's 20Hz bot tick rate this is ~one line every 500 ms per car.
 _DIAGNOSTIC_LOG_EVERY = 10
@@ -130,7 +135,7 @@ class Controller:
             return
         if not logger.isEnabledFor(logging.DEBUG):
             return
-        current_kmh = state.car.speed * _MS_TO_KMH
+        current_kmh = state.car.speed * _UNITS_TO_KMH
         steer = "L" if inputs.turn_left else ("R" if inputs.turn_right else "-")
         logger.debug(
             "controller@(%6.1f,%6.1f) heading=%+5.1f deg | target=%5.1f curr=%5.1f delta=%+6.1f km/h "
@@ -208,7 +213,7 @@ class Controller:
         state: BotGameState,
     ) -> tuple:
         """Return (accelerate, brake) bool pair."""
-        current_kmh = state.car.speed * _MS_TO_KMH
+        current_kmh = state.car.speed * _UNITS_TO_KMH
         deadband = self._base_speed_deadband_kmh * (1.0 - 0.5 * aggression)
         delta = target_speed_kmh - current_kmh
 

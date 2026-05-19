@@ -158,11 +158,12 @@ class TestWrapSignedDeg:
 
 class TestFormatGolden:
     def test_full_observation_matches_expected_lines(self):
+        # Calibration: 20 units/s × 0.6 = 12 km/h displayed (see #166).
         state = _state(
             car=_car(
                 position=(0.0, 0.0),
                 heading=0.0,
-                speed=20.0,  # m/s -> 72 km/h
+                speed=20.0,  # 12 km/h displayed
                 surface="gravel",
             ),
             track=_track(
@@ -174,7 +175,7 @@ class TestFormatGolden:
             opponents=[
                 _opponent(
                     position=(50.0, 0.0),
-                    velocity=(10.0, 0.0),  # 36 km/h
+                    velocity=(10.0, 0.0),  # 6 km/h
                     distance=50.0,
                     relative_angle=0.0,
                 )
@@ -184,7 +185,7 @@ class TestFormatGolden:
         out = format_observation(state)
         lines = out.split("\n")
         assert lines == [
-            "speed: 72 km/h",
+            "speed: 12 km/h",
             "heading: 0 deg",
             "surface: gravel",
             "off_track: no",
@@ -193,7 +194,7 @@ class TestFormatGolden:
             "checkpoint[1]: dist=100 m, bearing=0 deg",
             "checkpoint[2]: dist=200 m, bearing=0 deg",
             "checkpoint[3]: dist=300 m, bearing=0 deg",
-            "opponent[1]: dist=50 m, bearing=0 deg, rel_speed=36 km/h",
+            "opponent[1]: dist=50 m, bearing=0 deg, rel_speed=6 km/h",
             "opponent[2]: none",
         ]
 

@@ -37,21 +37,22 @@ _MIN_TARGET_SPEED_KMH = 30.0
 
 _SYSTEM_PROMPT = (
     "You are a rally driver racing to finish the stage AS FAST AS POSSIBLE. "
-    "Wet, gravel, and ice surfaces reduce grip but you still race — pick a "
-    "safer speed and a wider racing line, but never stop.\n\n"
+    "Top speed is around 180 km/h. Wet, gravel, and ice surfaces reduce "
+    "grip but you still race — pick a safer speed and a wider racing line, "
+    "but never stop.\n\n"
     "Given the observation, decide your driving intent for the next second.\n\n"
     "Output ONLY a JSON object with these fields:\n"
-    '  "target_speed_kmh": number between 40 and 250\n'
-    "     (40-70 on tight corners or low-grip surfaces; 80-150 on flowing "
-    "corners; 150-250 on straights. NEVER output less than 40.)\n"
+    '  "target_speed_kmh": number between 40 and 200\n'
+    "     (40-70 on tight corners or low-grip surfaces; 80-130 on flowing "
+    "corners; 130-180 on straights. NEVER output less than 40.)\n"
     '  "racing_line_offset_m": number between -10 and 10 (negative = left of centre)\n'
     '  "aggression": number between 0.3 and 1.0 '
     "(0.3 = careful, 1.0 = full attack; use 0.5+ on most segments)\n\n"
     "Examples:\n"
     "Observation: speed=20 km/h, next checkpoint=120m straight ahead, surface=asphalt\n"
-    'Intent: {"target_speed_kmh": 180, "racing_line_offset_m": 0, "aggression": 0.7}\n\n'
-    "Observation: speed=140 km/h, next checkpoint=40m bearing 45 deg, surface=gravel\n"
-    'Intent: {"target_speed_kmh": 70, "racing_line_offset_m": -2, "aggression": 0.5}\n\n'
+    'Intent: {"target_speed_kmh": 170, "racing_line_offset_m": 0, "aggression": 0.7}\n\n'
+    "Observation: speed=120 km/h, next checkpoint=40m bearing 45 deg, surface=gravel\n"
+    'Intent: {"target_speed_kmh": 65, "racing_line_offset_m": -2, "aggression": 0.5}\n\n'
     "Output nothing else. No prose, no markdown, no code fences."
 )
 

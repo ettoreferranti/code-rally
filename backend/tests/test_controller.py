@@ -27,13 +27,13 @@ from app.bot_runtime.types import (
 def _car(
     position: Tuple[float, float] = (0.0, 0.0),
     heading: float = 0.0,
-    speed_ms: float = 0.0,
+    speed: float = 0.0,  # engine units/s (multiply by _UNITS_TO_KMH=0.6 for km/h)
 ) -> BotCarState:
     return BotCarState(
         position=position,
         heading=heading,
-        speed=speed_ms,
-        velocity=(speed_ms * math.cos(heading), speed_ms * math.sin(heading)),
+        speed=speed,
+        velocity=(speed * math.cos(heading), speed * math.sin(heading)),
         angular_velocity=0.0,
         health=100.0,
         nitro_charges=3,
@@ -185,28 +185,43 @@ class TestSteeringYDownConvention:
 class TestSpeed:
     def test_below_target_accelerates(self):
         ctrl = Controller()
-        state = _state(car=_car(speed_ms=10.0))  # 36 km/h
+        state = _state(car=_car(speed=10.0))  # 6 km/h displayed
         out = ctrl.compute(_intent(target_speed_kmh=80.0), state)
         assert out.accelerate and not out.brake
 
     def test_above_target_brakes(self):
         ctrl = Controller()
-        state = _state(car=_car(speed_ms=30.0))  # 108 km/h
+        # speed=100 units/s = 60 km/h displayed (> 50 km/h target → brake).
+        state = _state(car=_car(speed=100.0))
         out = ctrl.compute(_intent(target_speed_kmh=50.0), state)
         assert out.brake and not out.accelerate
 
     def test_within_deadband_coasts(self):
         ctrl = Controller()
         # Aggression 0 → wider deadband (4 km/h). 80 km/h ± 3 km/h is coast.
-        state = _state(car=_car(speed_ms=80.0 / 3.6))
+        # 80 km/h displayed = 80 / 0.6 ≈ 133.33 units/s.
+        state = _state(car=_car(speed=80.0 / 0.6))
         out = ctrl.compute(_intent(target_speed_kmh=80.0, aggression=0.0), state)
         assert not out.accelerate and not out.brake
 
     def test_target_speed_zero_brakes_when_moving(self):
         ctrl = Controller()
-        state = _state(car=_car(speed_ms=20.0))
+        state = _state(car=_car(speed=20.0))
         out = ctrl.compute(_intent(target_speed_kmh=0.0), state)
         assert out.brake
+
+    def test_target_150_kmh_resolves_to_realistic_engine_speed(self):
+        """Calibration regression for #166: at target 150 km/h, the
+        controller wants the car at 150/0.6 = 250 units/s — which is
+        83% of MAX_SPEED, i.e. visually fast. Under the old (wrong)
+        3.6 conversion the same intent only asked for 42 units/s.
+        """
+        ctrl = Controller()
+        # Car already at 250 units/s should COAST (within 4 km/h deadband)
+        # because curr = 250 * 0.6 = 150 km/h matches target exactly.
+        state = _state(car=_car(speed=250.0))
+        out = ctrl.compute(_intent(target_speed_kmh=150.0, aggression=0.0), state)
+        assert not out.accelerate and not out.brake
 
 
 # ===== Fallback behaviour =====
@@ -215,7 +230,7 @@ class TestSpeed:
 class TestFallback:
     def test_none_intent_with_no_history_does_not_raise(self):
         ctrl = Controller()
-        state = _state(car=_car(speed_ms=0.0))
+        state = _state(car=_car(speed=0.0))
         out = ctrl.compute(None, state)
         # Stationary + fallback cruise speed > 0 → should accelerate
         assert isinstance(out, ControlInputs)
@@ -223,7 +238,7 @@ class TestFallback:
 
     def test_none_intent_holds_last_intent(self):
         ctrl = Controller()
-        state = _state(car=_car(speed_ms=0.0))
+        state = _state(car=_car(speed=0.0))
         first = ctrl.compute(_intent(target_speed_kmh=100.0), state)
         held = ctrl.compute(None, state)
         # Both ticks see speed 0; both should accelerate toward 100 km/h
@@ -231,11 +246,12 @@ class TestFallback:
 
     def test_intent_replaces_held_intent(self):
         ctrl = Controller()
-        state = _state(car=_car(speed_ms=30.0))  # 108 km/h
-        # Hold an intent that says target=100 → at 108, would brake
+        # speed=200 units/s = 120 km/h displayed.
+        state = _state(car=_car(speed=200.0))
+        # Hold an intent that says target=100 → at 120, would brake.
         first = ctrl.compute(_intent(target_speed_kmh=100.0), state)
         assert first.brake
-        # Now strategist returns a new intent with target=150 → should accelerate
+        # Now strategist returns a new intent with target=150 → should accelerate.
         new = ctrl.compute(_intent(target_speed_kmh=150.0), state)
         assert new.accelerate and not new.brake
 
@@ -259,7 +275,7 @@ class TestRobustness:
         ctrl_a = Controller()
         ctrl_b = Controller()
         state = _state(
-            car=_car(position=(10.0, 5.0), heading=0.3, speed_ms=15.0),
+            car=_car(position=(10.0, 5.0), heading=0.3, speed=15.0),
             checkpoints=[(100.0, 30.0), (200.0, 60.0)],
             next_checkpoint=0,
         )
@@ -268,7 +284,7 @@ class TestRobustness:
 
     def test_aggression_one_or_zero_does_not_crash(self):
         ctrl = Controller()
-        state = _state(car=_car(speed_ms=10.0))
+        state = _state(car=_car(speed=10.0))
         for aggr in (0.0, 1.0):
             out = ctrl.compute(_intent(aggression=aggr), state)
             assert isinstance(out, ControlInputs)
@@ -279,7 +295,7 @@ class TestRobustness:
 
         ctrl = Controller()
         state = _state(
-            car=_car(position=(10.0, 5.0), heading=0.3, speed_ms=15.0),
+            car=_car(position=(10.0, 5.0), heading=0.3, speed=15.0),
             checkpoints=[(100.0, 30.0), (200.0, 60.0), (300.0, 90.0)],
         )
         intent = _intent()

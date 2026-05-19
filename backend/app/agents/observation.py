@@ -52,7 +52,11 @@ from app.bot_runtime.types import BotGameState, BotOpponent
 _NUM_CHECKPOINT_SLOTS = 3
 _NUM_OPPONENT_SLOTS = 2
 
-_MS_TO_KMH = 3.6
+# Conversion from engine speed (units/s) to displayed km/h. Matches
+# `frontend/src/components/RaceHUD.tsx` (300 units/s → ~180 km/h) so the
+# LLM observation, the thought bubble, and the user's HUD all show the
+# same number (#166).
+_UNITS_TO_KMH = 0.6
 
 
 def format_observation(state: BotGameState) -> str:
@@ -63,7 +67,7 @@ def format_observation(state: BotGameState) -> str:
     """
     lines: List[str] = []
 
-    speed_kmh = state.car.speed * _MS_TO_KMH
+    speed_kmh = state.car.speed * _UNITS_TO_KMH
     heading_deg = _wrap_signed_deg(math.degrees(state.car.heading))
 
     lines.append(f"speed: {speed_kmh:.0f} km/h")
@@ -113,7 +117,7 @@ def _format_opponents(opponents: List[BotOpponent]) -> List[str]:
     out: List[str] = []
     for opp in nearest:
         bearing_deg = _wrap_signed_deg(math.degrees(opp.relative_angle))
-        rel_speed_kmh = math.hypot(opp.velocity[0], opp.velocity[1]) * _MS_TO_KMH
+        rel_speed_kmh = math.hypot(opp.velocity[0], opp.velocity[1]) * _UNITS_TO_KMH
         out.append(
             f"dist={opp.distance:.0f} m, bearing={bearing_deg:.0f} deg, "
             f"rel_speed={rel_speed_kmh:.0f} km/h"
