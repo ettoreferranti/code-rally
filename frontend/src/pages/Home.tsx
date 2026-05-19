@@ -1,52 +1,61 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom';
 
+/**
+ * Landing page with two big choices: PLAY (jump into lobbies) or
+ * TINKER WITH BOTS (manage the bot library). All other entry points
+ * (Practice, Quick-play Multiplayer) collapse into "create a lobby".
+ */
 export default function Home() {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
 
   return (
     <div className="p-8">
-      <h2 className="text-3xl font-bold mb-4">Welcome to CodeRally</h2>
-      <p className="text-lg text-gray-300 mb-4">
-        Race using keyboard controls or write Python bots to compete
-        autonomously.
-      </p>
-
-      {/* Action Buttons */}
-      <div className="flex gap-4 mt-8 mb-8">
-        <button
-          onClick={() => navigate('/lobbies')}
-          className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg text-lg font-semibold"
-        >
-          Browse Lobbies
-        </button>
-        <button
-          onClick={() => navigate('/multiplayer')}
-          className="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg text-lg font-semibold"
-        >
-          Quick Play
-        </button>
-        <button
-          onClick={() => navigate('/editor')}
-          className="px-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-lg text-lg font-semibold"
-        >
-          Bot Editor
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <h3 className="text-xl font-bold mb-2">Play Mode</h3>
-          <p className="text-gray-400">
-            Race manually using keyboard controls
+      <div className="max-w-5xl mx-auto">
+        <div className="mb-10 text-center">
+          <h2 className="text-4xl font-bold mb-3">Welcome to CodeRally</h2>
+          <p className="text-lg text-gray-400">
+            Race a top-down 2D rally car — by hand, with a Python bot you wrote, or against a local LLM.
           </p>
         </div>
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <h3 className="text-xl font-bold mb-2">Bot Mode</h3>
-          <p className="text-gray-400">
-            Program your own racing bot in Python
-          </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <button
+            data-testid="tile-play"
+            onClick={() => navigate('/lobbies')}
+            className="
+              group relative overflow-hidden text-left rounded-2xl
+              bg-gradient-to-br from-green-700/80 to-green-900/80
+              border border-green-600/40 hover:border-green-400/60
+              p-8 h-64 transition transform hover:-translate-y-0.5
+              shadow-lg hover:shadow-green-900/40
+            "
+          >
+            <div className="text-6xl mb-4 transition group-hover:scale-110 inline-block">🏁</div>
+            <div className="text-3xl font-bold mb-2">Play</div>
+            <p className="text-green-100/90 text-sm leading-snug">
+              Join an existing lobby or create your own. Race solo, against humans, or against bots from your library.
+            </p>
+          </button>
+
+          <button
+            data-testid="tile-tinker"
+            onClick={() => navigate('/tinker')}
+            className="
+              group relative overflow-hidden text-left rounded-2xl
+              bg-gradient-to-br from-purple-700/80 to-purple-900/80
+              border border-purple-600/40 hover:border-purple-400/60
+              p-8 h-64 transition transform hover:-translate-y-0.5
+              shadow-lg hover:shadow-purple-900/40
+            "
+          >
+            <div className="text-6xl mb-4 transition group-hover:scale-110 inline-block">🛠️</div>
+            <div className="text-3xl font-bold mb-2">Tinker with bots</div>
+            <p className="text-purple-100/90 text-sm leading-snug">
+              Build your bot library — code Python drivers or configure local-LLM agents with custom system prompts.
+            </p>
+          </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

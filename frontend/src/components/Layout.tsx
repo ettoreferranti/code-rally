@@ -7,37 +7,25 @@ export default function Layout() {
       <header className="bg-gradient-to-br from-purple-600 to-purple-800 text-white py-6 px-4">
         <div className="container mx-auto">
           <div className="flex items-center justify-between">
-            <div>
+            <Link to="/" className="hover:opacity-90 transition">
               <h1 className="text-4xl font-bold">CodeRally</h1>
               <p className="text-sm opacity-90">
                 Top-down 2D racing game with programmable bots
               </p>
-            </div>
+            </Link>
             <div className="flex items-center gap-2">
               <nav className="flex gap-4">
                 <Link
-                  to="/"
-                  className="px-4 py-2 rounded hover:bg-white/20 transition"
+                  to="/lobbies"
+                  className="px-4 py-2 rounded hover:bg-white/20 transition font-semibold"
                 >
-                  Home
+                  Play
                 </Link>
                 <Link
-                  to="/practice"
-                  className="px-4 py-2 rounded hover:bg-white/20 transition"
+                  to="/tinker"
+                  className="px-4 py-2 rounded hover:bg-white/20 transition font-semibold"
                 >
-                  Practice
-                </Link>
-                <Link
-                  to="/multiplayer"
-                  className="px-4 py-2 rounded hover:bg-white/20 transition"
-                >
-                  Multiplayer
-                </Link>
-                <Link
-                  to="/editor"
-                  className="px-4 py-2 rounded hover:bg-white/20 transition"
-                >
-                  Editor
+                  Tinker
                 </Link>
               </nav>
               <div className="ml-3 pl-3 border-l border-white/20">
