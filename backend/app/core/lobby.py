@@ -117,12 +117,18 @@ class Lobby:
 
     def transfer_host(self) -> None:
         """
-        Transfer host to first remaining member.
+        Transfer host to the first remaining HUMAN member.
 
-        Called when current host leaves the lobby.
+        Bots can't actually be host — they can't click Start Race or
+        edit settings — so a transfer that lands on a bot would put
+        the lobby in a stuck "Waiting for host" state for anyone else
+        present. If no humans remain, ``host_player_id`` is left
+        unchanged; the next human to join the lobby reclaims it (see
+        ``LobbyManager.join_lobby``).
         """
-        if not self.members:
-            return
-
-        # Transfer to first member
-        self.host_player_id = next(iter(self.members.keys()))
+        for member in self.members.values():
+            if member.driver_kind == "human":
+                self.host_player_id = member.player_id
+                return
+        # No humans remained — leave host_player_id alone. The departed
+        # host stays nominally recorded until a human re-enters.

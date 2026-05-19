@@ -162,6 +162,22 @@ class LobbyManager:
             username=username
         )
         logger.info(f"Player {player_id} joined lobby {lobby_id} ({lobby.get_member_count()}/{lobby.settings.max_players})")
+
+        # Reclaim host if it currently points at someone absent or at a
+        # bot — neither can actually host. join_lobby is only called for
+        # humans (bots come in via add_bot_to_lobby) so a present human
+        # claimant is always available here.
+        host_member = lobby.members.get(lobby.host_player_id)
+        host_is_present_human = (
+            host_member is not None and host_member.driver_kind == "human"
+        )
+        if not host_is_present_human:
+            previous_host = lobby.host_player_id
+            lobby.host_player_id = player_id
+            logger.info(
+                f"Host claimed by {player_id} in lobby {lobby_id} (previous host {previous_host} absent or non-human)"
+            )
+
         return True
 
     def leave_lobby(self, lobby_id: str, player_id: str) -> bool:

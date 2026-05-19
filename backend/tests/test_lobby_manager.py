@@ -279,6 +279,69 @@ class TestLobbyManager:
         assert retrieved.host_player_id in ["player2", "player3"]
         assert len(retrieved.members) == 2
 
+    def test_host_does_not_transfer_to_a_bot(self, manager, monkeypatch):
+        """When the host leaves and only bots remain, host_player_id stays
+        as the departed creator — bots can't actually host (can't click
+        Start Race) so transferring to one stuck the lobby in 'Waiting
+        for host' for any future human joiner.
+        """
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+
+        lobby = manager.create_lobby("Test", "alice")
+        # Add an LLM bot via the unified flow.
+        manager.add_bot_to_lobby(
+            lobby_id=lobby.lobby_id,
+            bot_id=42,
+            kind="llm_bot",
+            bot_name="MyLLM",
+            owner_username="alice",
+            model_path="mlx-community/x",
+            system_prompt="p",
+        )
+        # alice (host) leaves; only the bot member remains.
+        manager.leave_lobby(lobby.lobby_id, "alice")
+
+        retrieved = manager.get_lobby(lobby.lobby_id)
+        assert retrieved is not None
+        # host stays as alice (the departed creator), not the bot.
+        assert retrieved.host_player_id == "alice"
+
+    def test_creator_reclaims_host_on_rejoin_after_bot_takeover(self, manager, monkeypatch):
+        """Regression for the user's report: after creating a lobby with
+        a bot and leaving, the user could re-enter the lobby (good!)
+        but couldn't start the race ('Waiting for host to start race...')
+        because host had transferred to the bot in an earlier code path.
+
+        With the no-transfer-to-bot fix in place, host already stays as
+        alice when she leaves. This test also covers the legacy case
+        where a pre-existing lobby had host=bot: rejoining alice
+        reclaims host.
+        """
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+
+        lobby = manager.create_lobby("Test", "alice")
+        manager.add_bot_to_lobby(
+            lobby_id=lobby.lobby_id,
+            bot_id=42, kind="llm_bot", bot_name="MyLLM",
+            owner_username="alice",
+            model_path="mlx-community/x", system_prompt="p",
+        )
+        # Simulate the legacy bug: host got transferred to the bot anyway
+        # (e.g. an old lobby from before today's fix).
+        bot_player_id = next(
+            m.player_id for m in lobby.members.values() if m.is_bot
+        )
+        lobby.host_player_id = bot_player_id
+        manager.leave_lobby(lobby.lobby_id, "alice")
+        assert manager.get_lobby(lobby.lobby_id).host_player_id == bot_player_id
+
+        # alice rejoins → should reclaim host.
+        manager.join_lobby(lobby.lobby_id, "alice")
+        retrieved = manager.get_lobby(lobby.lobby_id)
+        assert retrieved.host_player_id == "alice"
+
     def test_creator_player_id_stable_through_host_transfer(self, manager):
         """When the original host leaves and host transfers to another
         member, creator_player_id MUST NOT change — the frontend uses it
