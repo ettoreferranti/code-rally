@@ -57,13 +57,25 @@ class LobbyMember:
 
 @dataclass
 class Lobby:
-    """Main lobby data structure."""
+    """Main lobby data structure.
+
+    Two distinct identities matter here:
+      - ``creator_player_id``: who originally made the lobby. NEVER changes.
+        Used by the frontend to badge "YOUR LOBBY" rows on /lobbies.
+      - ``host_player_id``: who can start the race right now. May transfer
+        between members (e.g. when the original host leaves and other
+        human members remain). Used for the start-race permission check.
+
+    For freshly-created lobbies they're the same value; they diverge only
+    after host transfer.
+    """
     lobby_id: str  # UUID
     join_code: str  # Shareable code like "FAST-TIGER-42"
     name: str  # Display name
-    host_player_id: str  # Player who created lobby
+    host_player_id: str  # Current host — can start the race
     settings: LobbySettings
     members: Dict[str, LobbyMember]  # player_id -> LobbyMember
+    creator_player_id: Optional[str] = None  # Original creator (stable identity)
     spectators: Dict[str, LobbyMember] = field(default_factory=dict)  # player_id -> LobbyMember
     status: LobbyStatus = LobbyStatus.WAITING
     created_at: float = field(default_factory=time.time)

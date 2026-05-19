@@ -32,6 +32,9 @@ export interface LobbyListItem {
   join_code: string;
   name: string;
   host_player_id: string;
+  // Original creator. Stable identity that never changes once set, even
+  // when host transfers to a different member. Older payloads may omit it.
+  creator_player_id?: string | null;
   member_count: number;
   max_players: number;
   status: string;
@@ -45,6 +48,7 @@ export interface Lobby {
   join_code: string;
   name: string;
   host_player_id: string;
+  creator_player_id?: string | null;
   settings: LobbySettings;
   members: LobbyMember[];
   status: string;

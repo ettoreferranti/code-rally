@@ -42,6 +42,7 @@ const baseLobby = (overrides: Partial<any> = {}) => ({
   join_code: 'TEST-CODE',
   name: 'Test Lobby',
   host_player_id: 'someone-else',
+  creator_player_id: 'someone-else',
   member_count: 1,
   max_players: 4,
   status: 'waiting',
@@ -56,27 +57,52 @@ describe('LobbyBrowser — join existing lobby (#168)', () => {
     (globalThis as any).__mockedLobbies = [];
   });
 
-  it('shows the host name on every lobby card', async () => {
+  it('shows the creator name on every lobby card', async () => {
     setLobbies([
-      baseLobby({ name: 'BobsRace', host_player_id: 'bob' }),
-      baseLobby({ lobby_id: 'lobby-2', name: 'CarolsRace', host_player_id: 'carol' }),
+      baseLobby({ name: 'BobsRace', host_player_id: 'bob', creator_player_id: 'bob' }),
+      baseLobby({ lobby_id: 'lobby-2', name: 'CarolsRace',
+                  host_player_id: 'carol', creator_player_id: 'carol' }),
     ]);
 
     renderBrowser();
 
     await waitFor(() => expect(screen.getByText('BobsRace')).toBeInTheDocument());
-    // Host name appears inside a span next to "Hosted by"; match the
-    // text node that holds both via a flexible function matcher.
-    const hasHostText = (name: string) =>
+    // Creator name appears inside a span next to "Created by"; match
+    // the text node that holds both via a flexible function matcher.
+    const hasCreatorText = (name: string) =>
       (_content: string, node: Element | null) =>
-        node?.textContent === `Hosted by ${name}`;
-    expect(screen.getByText(hasHostText('bob'))).toBeInTheDocument();
-    expect(screen.getByText(hasHostText('carol'))).toBeInTheDocument();
+        node?.textContent === `Created by ${name}`;
+    expect(screen.getByText(hasCreatorText('bob'))).toBeInTheDocument();
+    expect(screen.getByText(hasCreatorText('carol'))).toBeInTheDocument();
+  });
+
+  it('badges a lobby as the user\'s own based on creator_player_id, NOT host_player_id', async () => {
+    // Regression for the host-transferred-to-bot case: when alice creates
+    // a lobby, adds bots, and leaves, host_player_id transfers to a bot
+    // (e.g. "llm-alice-2"). The card must still show "YOUR LOBBY" for
+    // alice because creator_player_id is stable.
+    setLobbies([
+      baseLobby({
+        host_player_id: 'llm-alice-2',  // transferred to an LLM bot
+        creator_player_id: 'alice',     // alice still owns it
+        name: 'AlicesTrashedLobby',
+      }),
+    ]);
+
+    renderBrowser();
+
+    await waitFor(() => expect(screen.getByText('AlicesTrashedLobby')).toBeInTheDocument());
+    expect(screen.getByTestId('your-lobby-badge')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Resume/i })).toBeInTheDocument();
   });
 
   it('shows "YOUR LOBBY" badge and Resume button on the current user\'s own lobbies', async () => {
     setLobbies([
-      baseLobby({ host_player_id: 'alice', name: 'AlicesRace' }),
+      baseLobby({
+        host_player_id: 'alice',
+        creator_player_id: 'alice',
+        name: 'AlicesRace',
+      }),
     ]);
 
     renderBrowser();

@@ -67,6 +67,7 @@ class LobbyManager:
             join_code=join_code,
             name=name,
             host_player_id=host_player_id,
+            creator_player_id=host_player_id,  # stable identity — never changes
             settings=settings or LobbySettings(),
             members={
                 host_player_id: LobbyMember(

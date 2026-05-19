@@ -63,6 +63,7 @@ class LobbyResponse(BaseModel):
     join_code: str
     name: str
     host_player_id: str
+    creator_player_id: Optional[str] = None
     settings: LobbySettingsResponse
     members: List[LobbyMemberResponse]
     status: str
@@ -77,6 +78,7 @@ class LobbyListItemResponse(BaseModel):
     join_code: str
     name: str
     host_player_id: str
+    creator_player_id: Optional[str] = None
     member_count: int
     max_players: int
     status: str
@@ -94,6 +96,7 @@ def _lobby_to_response(lobby) -> LobbyResponse:
         join_code=lobby.join_code,
         name=lobby.name,
         host_player_id=lobby.host_player_id,
+        creator_player_id=lobby.creator_player_id,
         settings=LobbySettingsResponse(
             track_difficulty=lobby.settings.track_difficulty,
             track_seed=lobby.settings.track_seed,
@@ -124,6 +127,7 @@ def _lobby_to_list_item(lobby) -> LobbyListItemResponse:
         join_code=lobby.join_code,
         name=lobby.name,
         host_player_id=lobby.host_player_id,
+        creator_player_id=lobby.creator_player_id,
         member_count=lobby.get_member_count(),
         max_players=lobby.settings.max_players,
         status=lobby.status.value,

@@ -337,6 +337,7 @@ def serialize_lobby_state(lobby) -> dict:
         'join_code': lobby.join_code,
         'name': lobby.name,
         'host_player_id': lobby.host_player_id,
+        'creator_player_id': lobby.creator_player_id,
         'status': lobby.status.value,
         'settings': {
             'track_difficulty': lobby.settings.track_difficulty,

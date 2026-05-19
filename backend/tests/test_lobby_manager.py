@@ -279,6 +279,23 @@ class TestLobbyManager:
         assert retrieved.host_player_id in ["player2", "player3"]
         assert len(retrieved.members) == 2
 
+    def test_creator_player_id_stable_through_host_transfer(self, manager):
+        """When the original host leaves and host transfers to another
+        member, creator_player_id MUST NOT change — the frontend uses it
+        to badge a user's own lobbies, even after host transfer.
+        """
+        lobby = manager.create_lobby("Test Lobby", "alice")
+        assert lobby.creator_player_id == "alice"
+
+        manager.join_lobby(lobby.lobby_id, "bob", "bob")
+        manager.leave_lobby(lobby.lobby_id, "alice")
+
+        retrieved = manager.get_lobby(lobby.lobby_id)
+        assert retrieved is not None
+        # Host transferred to bob, but creator stays alice.
+        assert retrieved.host_player_id == "bob"
+        assert retrieved.creator_player_id == "alice"
+
     def test_last_member_leaves_keeps_lobby_alive(self, manager):
         """When the last member (also the host) leaves, the lobby stays in
         WAITING so the user can come back and Resume. We do NOT auto-disband

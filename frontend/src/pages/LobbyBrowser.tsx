@@ -139,7 +139,12 @@ const LobbyBrowser: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {lobbies.map((lobby) => {
-              const isOwnLobby = !!username && lobby.host_player_id === username;
+              // Use creator (stable) for the "YOUR LOBBY" badge so a host
+              // transfer to a bot doesn't make the lobby look like
+              // someone else's. Fall back to host_player_id for old
+              // payloads that don't have creator_player_id yet.
+              const ownerId = lobby.creator_player_id ?? lobby.host_player_id;
+              const isOwnLobby = !!username && ownerId === username;
               const isFull = lobby.member_count >= lobby.max_players;
               return (
                 <div
@@ -163,7 +168,7 @@ const LobbyBrowser: React.FC = () => {
                   </div>
                   <div className="space-y-1 text-gray-300 mb-4">
                     <p className="text-sm">
-                      Hosted by <span className="font-semibold">{lobby.host_player_id}</span>
+                      Created by <span className="font-semibold">{ownerId}</span>
                     </p>
                     <p>
                       Players: {lobby.member_count} / {lobby.max_players}
