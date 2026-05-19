@@ -54,8 +54,10 @@ class FakeWebSocket {
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   onclose: (() => void) | null = null;
+  url: string;
 
-  constructor(public url: string) {
+  constructor(url: string) {
+    this.url = url;
     FakeWebSocket.lastInstance = this;
     setTimeout(() => this.onopen?.(), 0);
   }

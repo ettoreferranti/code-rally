@@ -66,7 +66,9 @@ export function useGameLoop(
     const startLoop = () => {
       const physics = physicsRef.current;
       let running = true;
-      let animationFrameId: number;
+      // The loop terminates via the `running` flag check at the top of
+      // gameLoop; we don't keep the requestAnimationFrame ID because
+      // there's no explicit cancellation point.
 
       // Initialize previous car position
       const initialState = currentGameStateRef.current!;
@@ -142,11 +144,11 @@ export function useGameLoop(
         callbacksRef.current.onUpdate(currentGameStateRef.current);
 
         // Continue loop
-        animationFrameId = requestAnimationFrame(gameLoop);
+        requestAnimationFrame(gameLoop);
       };
 
       // Start the loop
-      animationFrameId = requestAnimationFrame(gameLoop);
+      requestAnimationFrame(gameLoop);
     };
 
     // Cleanup function (only on unmount)

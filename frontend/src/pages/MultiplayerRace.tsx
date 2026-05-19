@@ -7,7 +7,9 @@ import { RaceResultsScreen } from '../components/RaceResultsScreen';
 import { GameWebSocketClient, type GameStateMessage } from '../services';
 
 export default function MultiplayerRace() {
-  const [track, setTrack] = useState<Track | null>(null);
+  // Track is captured in state to trigger re-renders on receipt; the
+  // value itself is read via `trackRef.current` everywhere downstream.
+  const [_track, setTrack] = useState<Track | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

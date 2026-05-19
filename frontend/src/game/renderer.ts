@@ -2,7 +2,7 @@
  * Canvas rendering utilities for CodeRally.
  */
 
-import type { Track, TrackSegment, CarState, Vector2 } from './types';
+import type { Track, TrackSegment, CarState } from './types';
 import { SurfaceType } from './types';
 
 /**

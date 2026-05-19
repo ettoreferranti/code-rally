@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { CountdownOverlay } from './CountdownOverlay';
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 // Wrapper component to test state transitions
 function CountdownWrapper() {
@@ -65,7 +65,7 @@ describe('CountdownOverlay', () => {
   });
 
   it('applies correct color classes for countdown numbers', () => {
-    const { container } = render(
+    render(
       <CountdownOverlay
         countdown={2}
         isVisible={true}

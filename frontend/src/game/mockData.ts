@@ -173,7 +173,10 @@ export function createMockGameState(): GameState {
     is_drifting: false,
     drift_angle: 0,
     throttle: 0,
-    is_off_track: false
+    is_off_track: false,
+    nitro_charges: 0,
+    nitro_active: false,
+    nitro_remaining_ticks: 0,
   };
 
   return {
@@ -205,7 +208,7 @@ export function createMockGameState(): GameState {
  * Simple demonstration function - no longer needed as we use physics engine.
  * Kept for backwards compatibility.
  */
-export function updateMockCar(gameState: GameState, deltaTime: number): GameState {
+export function updateMockCar(gameState: GameState, _deltaTime: number): GameState {
   // Physics engine handles all updates now
   return gameState;
 }

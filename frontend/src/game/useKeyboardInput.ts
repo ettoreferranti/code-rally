@@ -42,8 +42,10 @@ export function useKeyboardInput(): InputState {
     nitro: false
   });
 
-  // Track which keys are currently pressed
-  const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
+  // Track which keys are currently pressed. The setter is called from
+  // key handlers; the value itself is read inside the setter callback,
+  // not from the outer scope — hence the underscore prefix.
+  const [_pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
 
   // Update input state based on pressed keys
   const updateInputState = useCallback((keys: Set<string>) => {

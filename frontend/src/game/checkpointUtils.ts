@@ -79,8 +79,9 @@ export function updateCheckpointProgress(
 
       // Check if this was the final checkpoint (finish line)
       const isFinished = newCheckpoint >= gameState.track.checkpoints.length;
-      const finishTime = isFinished
-        ? (Date.now() / 1000) - gameState.raceInfo.startTime
+      const startTime = gameState.raceInfo.startTime;
+      const finishTime = isFinished && startTime !== null
+        ? (Date.now() / 1000) - startTime
         : null;
 
       return {

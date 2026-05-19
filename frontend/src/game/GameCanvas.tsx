@@ -90,14 +90,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     canvas.width = width;
     canvas.height = height;
 
-    // Render loop
+    // Render loop. We don't compute deltaTime — the interpolated state
+    // already accounts for inter-frame timing — so no last-frame bookkeeping.
     let animationFrameId: number;
-    let lastFrameTime = performance.now();
 
     const render = (currentTime: number) => {
-      const deltaTime = currentTime - lastFrameTime;
-      lastFrameTime = currentTime;
-
       // FPS counter
       frameCountRef.current++;
       const now = Date.now();

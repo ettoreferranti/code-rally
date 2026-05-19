@@ -74,9 +74,11 @@ export const BotEditor: React.FC<BotEditorProps> = ({
     if (!editor || !monaco) return;
     editorRef.current = editor;
 
-    // Configure Python language features
+    // Configure Python language features. We don't use `model` /
+    // `position` for our completion suggestions (they're independent
+    // of cursor context), but the Monaco signature requires them.
     monaco.languages.registerCompletionItemProvider('python', {
-      provideCompletionItems: (model, position) => {
+      provideCompletionItems: (_model: unknown, _position: unknown) => {
         const suggestions: any[] = [];
 
         // BaseBot class and methods
@@ -180,9 +182,11 @@ export const BotEditor: React.FC<BotEditorProps> = ({
       }
     });
 
-    // Add hover tooltips
+    // Add hover tooltips. `model` / `position` come from Monaco; we
+    // treat them loosely typed because pulling the full Monaco type
+    // surface in just for these two calls is more cost than benefit.
     monaco.languages.registerHoverProvider('python', {
-      provideHover: (model, position) => {
+      provideHover: (model: any, position: any) => {
         const word = model.getWordAtPosition(position);
         if (!word) return null;
 

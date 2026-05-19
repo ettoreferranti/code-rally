@@ -2,12 +2,16 @@
  * Game state types for CodeRally frontend.
  */
 
-export enum SurfaceType {
-  ASPHALT = "asphalt",
-  WET = "wet",
-  GRAVEL = "gravel",
-  ICE = "ice"
-}
+// `erasableSyntaxOnly: true` in tsconfig forbids TS-only `enum`. The
+// const-object + type-alias pattern below preserves both the value
+// (`SurfaceType.ASPHALT`) and the type (`SurfaceType`) at use-sites.
+export const SurfaceType = {
+  ASPHALT: 'asphalt',
+  WET: 'wet',
+  GRAVEL: 'gravel',
+  ICE: 'ice',
+} as const;
+export type SurfaceType = (typeof SurfaceType)[keyof typeof SurfaceType];
 
 export interface Vector2 {
   x: number;
