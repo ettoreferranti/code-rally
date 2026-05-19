@@ -2,27 +2,49 @@
 
 ## Project Overview
 
-CodeRally is a top-down 2D racing game where players can race using keyboard controls or write Python bots to compete autonomously. Think "Robocode meets rally racing".
+CodeRally is a top-down 2D racing game. Drivers can be human (keyboard),
+Python (sandboxed RestrictedPython bot), or LLM (local MLX model with a
+per-bot system prompt). All three coexist in a lobby.
 
 **Repository**: https://github.com/ettoreferranti/code-rally
 **Owner**: Ettore Ferranti (@ettoreferranti)
+
+## App shape
+
+Two top-level areas:
+
+- **Play** (`/lobbies` and `/lobby/:id`) — browse or create a lobby,
+  add bots from the user's library, start race. The actual race
+  screen is `/race?session_id=...` and is reached only through a
+  lobby (no standalone entry point).
+- **Tinker** (`/tinker`) — unified bot library. Single list with
+  `[PY]`/`[LLM]` badges per row. Add wizard asks the kind first,
+  then collects kind-specific fields (Monaco editor for Python;
+  model preset dropdown + system_prompt textarea for LLM).
+
+The old `/practice`, `/multiplayer`, and `/editor` pages were
+removed; `/editor` redirects to `/tinker` for legacy URLs.
 
 ## Tech Stack
 
 ### Backend
 - **Framework**: FastAPI (Python 3.11+)
-- **Database**: SQLite with SQLAlchemy ORM
-- **WebSocket**: FastAPI WebSocket for real-time game state
-- **Bot Sandbox**: RestrictedPython for safe user code execution
-- **Testing**: pytest (106 tests: unit, integration, regression, end-to-end)
+- **Database**: SQLite with SQLAlchemy ORM. Single unified `bots`
+  table — `kind` column discriminates 'python' vs 'llm'.
+  Idempotent column-add migration in `app/database.py`.
+- **WebSocket**: FastAPI WebSocket for real-time game state.
+- **Python bot sandbox**: RestrictedPython.
+- **LLM bot runtime**: MLX (Apple Silicon only, optional install via
+  `requirements-agents.txt`). Two-tier agent: ~1Hz strategist outputs
+  structured Intent JSON, 20Hz deterministic Controller converts
+  Intent to engine bool flags.
+- **Testing**: pytest. ~400 tests.
 
 ### Frontend
-- **Framework**: React 18
-- **Rendering**: HTML5 Canvas (2D)
-- **Code Editor**: Monaco Editor
-- **State Management**: React Context + useReducer
-- **Build Tool**: Vite
-- **Testing**: Vitest + React Testing Library (5+ tests: component, integration)
+- **Framework**: React 18 + TypeScript + Vite
+- **Rendering**: HTML5 Canvas (2D); thought-bubble overlay as DOM.
+- **Code Editor**: Monaco Editor (Python bots only).
+- **Testing**: Vitest + React Testing Library.
 
 ## Project Structure
 
@@ -30,28 +52,41 @@ CodeRally is a top-down 2D racing game where players can race using keyboard con
 code-rally/
 ├── backend/
 │   ├── app/
-│   │   ├── api/           # FastAPI routes and WebSocket handlers
-│   │   ├── core/          # Game engine, physics, track generation
-│   │   ├── models/        # SQLAlchemy database models
-│   │   ├── services/      # Business logic layer
-│   │   ├── bot_runtime/   # RestrictedPython sandbox
-│   │   └── config.py      # Server configuration
+│   │   ├── api/routes/    # FastAPI routes (lobbies, bots, llm-models, game WS)
+│   │   ├── core/          # Game engine, physics, track, lobby_manager
+│   │   ├── agents/        # LLM strategist + controller + MLX runtime
+│   │   │   ├── llm_model_presets.json    # Curated MLX model list (editable)
+│   │   │   ├── llm_strategist.py
+│   │   │   ├── controller.py
+│   │   │   ├── observation.py
+│   │   │   ├── llm_bot.py
+│   │   │   └── mlx_runtime.py
+│   │   ├── models/        # SQLAlchemy: User, unified Bot (kind + llm fields)
+│   │   ├── services/      # bot_service, user_service
+│   │   ├── bot_runtime/   # RestrictedPython sandbox + bot types
+│   │   ├── database.py    # init_db + idempotent column-add migration
+│   │   └── config.py
 │   ├── tests/
 │   ├── requirements.txt
+│   ├── requirements-agents.txt  # Optional MLX deps (Apple Silicon)
 │   └── main.py
 ├── frontend/
 │   ├── src/
-│   │   ├── components/    # React UI components
-│   │   ├── game/          # Canvas rendering, game loop
-│   │   ├── editor/        # Monaco code editor
-│   │   └── services/      # API and WebSocket clients
+│   │   ├── pages/         # Home (tiles), LobbyBrowser, LobbyWaitingRoom,
+│   │   │                   #  MultiplayerRace, Tinker, JoinLobby
+│   │   ├── components/    # Layout, UserMenu, UserSwitcher, BotEditor,
+│   │   │                   #  AgentThoughtBubble, RaceHUD, ...
+│   │   ├── game/          # Canvas renderer, game loop, types,
+│   │   │                   #  state interpolation
+│   │   └── services/      # botApi (incl. /llm-models), gameWebSocket,
+│   │                       #  lobbyApi
 │   ├── public/
 │   └── package.json
 ├── docs/
-│   ├── architecture.md    # System architecture
-│   ├── bot-api.md         # Bot programming guide
-│   └── requirements.md    # Full requirements spec
-└── CLAUDE.md              # This file
+│   ├── architecture.md
+│   ├── bot-api.md
+│   └── requirements.md
+└── CLAUDE.md
 ```
 
 ## Development Workflow

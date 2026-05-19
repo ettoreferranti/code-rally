@@ -1,25 +1,34 @@
 # CodeRally 🏎️
 
-A programmable racing game where you code your own AI drivers in Python.
+A programmable racing game where you code your own AI drivers — in Python or as a locally-hosted LLM.
 
 ## Overview
 
-CodeRally is a top-down 2D racing game inspired by Group B rally championships. What makes it unique is that you can program your own bot drivers using Python, competing against human players and other bots on procedurally generated tracks.
+CodeRally is a top-down 2D racing game inspired by Group B rally championships. It supports three kinds of drivers in any lobby:
+
+- **Human** — race with the keyboard.
+- **Python bot** — write a `BaseBot` subclass in the in-browser editor; runs sandboxed via RestrictedPython.
+- **LLM bot** — a local language model (Apple-Silicon MLX) drives via a two-tier strategist/controller architecture with a per-bot system prompt.
+
+The app has two main areas:
+
+- **Play** (`/lobbies`) — browse / create a lobby, add bots from your library, race.
+- **Tinker with bots** (`/tinker`) — your unified bot library: list, edit, delete, create either kind.
 
 ## Features
 
-- **Simulation-style physics** with realistic drifting mechanics
-- **Procedurally generated tracks** with varied surfaces (asphalt, gravel, ice, wet conditions)
-- **Programmable bots** - Write Python code to control your car
-- **Multiple car types** with upgradeable components
-- **Multiplayer support** - Race against friends or bots
-- **Championship mode** - Compete across multiple races
+- **Simulation-style physics** with realistic drifting and four surface types (asphalt, gravel, ice, wet).
+- **Procedurally generated tracks** with checkpoints, boundaries, obstacles, and varying surfaces.
+- **Programmable bots** — Python sandbox OR local-LLM strategist with editable system prompt.
+- **Multiplayer lobbies** — humans + bots of either kind in the same race; spectator mode supported.
+- **Curated LLM model presets** — config-file driven (`backend/app/agents/llm_model_presets.json`), no code change to add a model.
 
 ## Tech Stack
 
-- **Backend**: Python (FastAPI), SQLite, WebSocket
-- **Frontend**: React, Canvas/WebGL
-- **Bot Runtime**: RestrictedPython (sandboxed execution)
+- **Backend**: Python (FastAPI), SQLite (single-table unified `Bot` model), WebSocket.
+- **Frontend**: React + Vite, HTML5 Canvas for rendering, Monaco for the Python editor.
+- **Python bot runtime**: RestrictedPython (sandboxed).
+- **LLM bot runtime**: MLX (Apple Silicon only, optional) — Qwen / Llama 4-bit models from `mlx-community`.
 
 ## Getting Started
 
