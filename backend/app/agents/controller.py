@@ -77,13 +77,25 @@ class Controller:
         fallback_speed_kmh: float = 30.0,
         base_steer_deadband_deg: float = 4.0,
         base_speed_deadband_kmh: float = 4.0,
+        speed_horizon_ticks: float = 1.5,
     ) -> None:
         self._fallback_speed_kmh = fallback_speed_kmh
         self._base_steer_deadband_deg = base_steer_deadband_deg
         self._base_speed_deadband_kmh = base_speed_deadband_kmh
+        # Anticipation horizon for the speed PD controller. The controller
+        # projects current_kmh forward by this many bot ticks using the
+        # measured rate of change, then switches accel/brake on the
+        # projected error. Default 1.5 (≈75 ms at 20 Hz bot tick) — enough
+        # to brake before the car blows past target, small enough to avoid
+        # introducing the opposite oscillation.
+        self._speed_horizon_ticks = speed_horizon_ticks
         self._last_intent: Optional[Intent] = None
         # Tick counter for throttled diagnostic logging (#162).
         self._tick_count: int = 0
+        # Previous km/h reading, used to estimate the speed rate-of-change
+        # for the projection above. None on the first call → fall back to
+        # plain bang-bang (no projection yet).
+        self._prev_speed_kmh: Optional[float] = None
 
     def compute(self, intent: Optional[Intent], state: BotGameState) -> ControlInputs:
         """Compute the next-tick control flags. Never raises."""
@@ -212,10 +224,27 @@ class Controller:
         aggression: float,
         state: BotGameState,
     ) -> tuple:
-        """Return (accelerate, brake) bool pair."""
+        """Return (accelerate, brake) bool pair.
+
+        Uses a one-step finite-difference predictor: project current_kmh
+        forward by ``speed_horizon_ticks`` using the rate of change since
+        the previous tick, then switch on the projected error. The engine
+        only accepts bool flags, so we keep the bang-bang output — but
+        decide *when* to flip on anticipated error, not current error.
+        That collapses the prior ±40 km/h oscillation around target.
+        """
         current_kmh = state.car.speed * _UNITS_TO_KMH
+
+        if self._prev_speed_kmh is not None:
+            rate_per_tick = current_kmh - self._prev_speed_kmh
+            projected_kmh = current_kmh + rate_per_tick * self._speed_horizon_ticks
+        else:
+            # First tick (no rate yet): fall back to plain bang-bang.
+            projected_kmh = current_kmh
+        self._prev_speed_kmh = current_kmh
+
         deadband = self._base_speed_deadband_kmh * (1.0 - 0.5 * aggression)
-        delta = target_speed_kmh - current_kmh
+        delta = target_speed_kmh - projected_kmh
 
         if delta > deadband:
             return True, False

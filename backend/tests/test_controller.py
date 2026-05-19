@@ -224,6 +224,60 @@ class TestSpeed:
         assert not out.accelerate and not out.brake
 
 
+class TestSpeedAnticipation:
+    """The controller projects speed forward by `speed_horizon_ticks` and
+    switches accel/brake on the projected error. This smooths the prior
+    bang-bang oscillation (observed: ±40 km/h around target).
+
+    Strategy: same bool output (engine constraint), but trigger the
+    state change earlier when the current trend already commits to
+    crossing target. Falls back to plain error on the first tick.
+    """
+
+    def test_brakes_early_when_speed_rising_toward_target(self):
+        # Speed rose from 228 → 240 units/s between ticks (136.8 → 144 km/h,
+        # rate ≈ 7.2 km/h/tick — close to the engine's full-accel rate).
+        # Current 144 is still 6 below the 150 target, but the 1.5-tick
+        # projection clears target+deadband(3 at agg=0.5) at 154.8 km/h.
+        # Without anticipation, this tick would still accelerate; with
+        # anticipation, we brake before the inevitable overshoot.
+        ctrl = Controller(speed_horizon_ticks=1.5)
+        ctrl.compute(_intent(target_speed_kmh=150.0),
+                     _state(car=_car(speed=228.0)))
+        out = ctrl.compute(_intent(target_speed_kmh=150.0),
+                           _state(car=_car(speed=240.0)))
+        assert out.brake and not out.accelerate
+
+    def test_keeps_accelerating_when_speed_falling_below_target(self):
+        # Falling: 260 → 240 (156 → 144 km/h, rate = −12 km/h/tick). Current
+        # 144 is only 6 below target, but the falling trend projects to 126
+        # → well below target → accelerate.
+        ctrl = Controller(speed_horizon_ticks=1.5)
+        ctrl.compute(_intent(target_speed_kmh=150.0),
+                     _state(car=_car(speed=260.0)))
+        out = ctrl.compute(_intent(target_speed_kmh=150.0),
+                           _state(car=_car(speed=240.0)))
+        assert out.accelerate and not out.brake
+
+    def test_steady_at_target_coasts(self):
+        # Speed stable at 150 km/h (250 units/s) across two calls.
+        # Projection = current, delta=0, coast.
+        ctrl = Controller(speed_horizon_ticks=1.5)
+        ctrl.compute(_intent(target_speed_kmh=150.0, aggression=0.0),
+                     _state(car=_car(speed=250.0)))
+        out = ctrl.compute(_intent(target_speed_kmh=150.0, aggression=0.0),
+                           _state(car=_car(speed=250.0)))
+        assert not out.accelerate and not out.brake
+
+    def test_first_call_falls_back_to_plain_error(self):
+        # No previous speed yet → must behave like the old bang-bang.
+        # 100 units/s = 60 km/h, target=150 → accelerate.
+        ctrl = Controller(speed_horizon_ticks=1.5)
+        out = ctrl.compute(_intent(target_speed_kmh=150.0, aggression=0.0),
+                           _state(car=_car(speed=100.0)))
+        assert out.accelerate and not out.brake
+
+
 # ===== Fallback behaviour =====
 
 
