@@ -75,12 +75,6 @@ async def test_generate_pins_to_single_thread(monkeypatch):
         self._tokenizer = None
         self._generate = stub_inner_generate
         self._max_tokens = max_tokens
-        # Single-thread executor is owned by the runtime — see __init__
-        # in production. Mimic the same here.
-        import concurrent.futures
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="mlx-runtime-test"
-        )
 
     monkeypatch.setattr(MLXRuntime, "__init__", stub_init)
 
@@ -102,6 +96,48 @@ async def test_generate_pins_to_single_thread(monkeypatch):
     assert len(seen_threads) == 7
     assert len(set(seen_threads)) == 1, (
         f"All generate calls must run on one thread; saw {set(seen_threads)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_pins_across_runtimes_to_one_thread(monkeypatch):
+    """Two MLXRuntime instances must share a single worker thread (#170).
+
+    MLX appears to use a process-wide default Metal context, so two
+    runtimes (different models) on two threads still collide. The fix
+    is a module-level shared executor.
+    """
+    import threading
+
+    seen_threads = []
+
+    def stub_inner_generate(model, tokenizer, prompt, max_tokens, verbose):
+        seen_threads.append(threading.get_ident())
+        time.sleep(0.01)
+        return "ok"
+
+    def stub_init(self, model_path=mlx_runtime.DEFAULT_MODEL_PATH, max_tokens=64):
+        self._model = None
+        self._tokenizer = None
+        self._generate = stub_inner_generate
+        self._max_tokens = max_tokens
+
+    monkeypatch.setattr(MLXRuntime, "__init__", stub_init)
+
+    runtime_a = MLXRuntime()
+    runtime_b = MLXRuntime()
+
+    # Both runtimes' generate calls, interleaved.
+    await asyncio.gather(
+        runtime_a.generate("a1"),
+        runtime_b.generate("b1"),
+        runtime_a.generate("a2"),
+        runtime_b.generate("b2"),
+    )
+
+    assert len(seen_threads) == 4
+    assert len(set(seen_threads)) == 1, (
+        f"Cross-runtime inference must share one thread; saw {set(seen_threads)}"
     )
 
 
@@ -137,10 +173,6 @@ async def test_generate_serializes_concurrent_calls(monkeypatch):
         self._tokenizer = None
         self._generate = stub_inner_generate
         self._max_tokens = max_tokens
-        import concurrent.futures
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="mlx-runtime-test"
-        )
 
     monkeypatch.setattr(MLXRuntime, "__init__", stub_init)
 

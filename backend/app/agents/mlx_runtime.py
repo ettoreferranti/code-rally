@@ -26,6 +26,22 @@ DEFAULT_MODEL_PATH = os.environ.get(
 )
 
 
+# Shared single-worker executor across *all* MLXRuntime instances.
+# MLX uses a process-wide default Metal stream, so two runtimes (different
+# models) running inference on separate threads still collide on the same
+# command buffer state (#167 was the symptom on same-model; #170 is the
+# same family of bug for different models). Funnelling every generate
+# through one OS thread, regardless of model, is the only safe ordering.
+#
+# Trade-off: with N LLM bots, inference is strictly serial across them.
+# At ~300-500 ms per call and 1Hz strategist tick, N=3 bots is the
+# practical ceiling before the controller starts running on stale intents.
+_MLX_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="mlx-shared",
+)
+
+
 class MLXRuntime:
     """Per-model_path cached runtime wrapping the mlx-lm model+tokenizer.
 
@@ -50,30 +66,18 @@ class MLXRuntime:
         self._model, self._tokenizer = load(model_path)
         self._generate = generate
         self._max_tokens = max_tokens
-        # All inference on this runtime runs on a single dedicated worker
-        # thread. Two reasons (#163, #167):
-        #   1. The executor's `max_workers=1` queue naturally serialises
-        #      concurrent callers, so we don't need a separate asyncio.Lock.
-        #   2. Metal command-buffer state is tied to thread identity for
-        #      some operations; consecutive `asyncio.to_thread(...)` calls
-        #      would bounce between pool threads and trip Metal asserts.
-        #      Pinning to one thread keeps the GPU context consistent.
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1,
-            thread_name_prefix=f"mlx-runtime[{model_path}]",
-        )
         logger.info("MLX model loaded")
 
     async def generate(self, prompt: str) -> str:
         """Async wrapper around the synchronous mlx-lm generate call.
 
-        Routes through the runtime's dedicated single-worker executor so
-        every generate runs on the same OS thread and concurrent callers
-        queue up (no separate lock needed).
+        Routes through the module-level shared single-worker executor
+        (see _MLX_EXECUTOR above) so every MLX call across every runtime
+        runs on the same OS thread. Concurrent callers queue.
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            self._executor,
+            _MLX_EXECUTOR,
             lambda: self._generate(
                 self._model,
                 self._tokenizer,
