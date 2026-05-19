@@ -7,7 +7,7 @@ and persistence of model_path + system_prompt for LLM bots.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -20,6 +20,9 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 
 
 # Request/Response models
+_BOT_MODEL_CONFIG = ConfigDict(from_attributes=True, protected_namespaces=())
+
+
 class CreateBotRequest(BaseModel):
     """Request model for creating either a Python or LLM bot.
 
@@ -27,6 +30,8 @@ class CreateBotRequest(BaseModel):
       - 'python' (default): `code` is required.
       - 'llm': `model_path` and `system_prompt` are required.
     """
+    model_config = ConfigDict(protected_namespaces=())
+
     name: str = Field(..., min_length=1, max_length=100, description="Bot display name")
     kind: str = Field("python", description="'python' or 'llm'")
     code: Optional[str] = Field(None, description="Python source code (required for kind='python')")
@@ -40,6 +45,8 @@ class UpdateBotRequest(BaseModel):
     Update fields that match the bot's `kind`. Kind itself is immutable
     after creation.
     """
+    model_config = ConfigDict(protected_namespaces=())
+
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="New bot name (optional)")
     code: Optional[str] = Field(None, min_length=1, description="New Python source code (Python bots only)")
     model_path: Optional[str] = Field(None, description="New model path (LLM bots only)")
@@ -48,6 +55,8 @@ class UpdateBotRequest(BaseModel):
 
 class BotResponse(BaseModel):
     """Response model for bot data (full)."""
+    model_config = _BOT_MODEL_CONFIG
+
     id: int
     name: str
     kind: str
@@ -58,12 +67,11 @@ class BotResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class BotListResponse(BaseModel):
     """Response model for bot listing (kind + model surfaced; code omitted)."""
+    model_config = _BOT_MODEL_CONFIG
+
     id: int
     name: str
     kind: str
@@ -71,9 +79,6 @@ class BotListResponse(BaseModel):
     user_id: int
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 @router.get("/users/{username}/bots", response_model=List[BotListResponse])

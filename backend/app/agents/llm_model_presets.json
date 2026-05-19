@@ -1,0 +1,35 @@
+{
+  "_comment": "Curated MLX models for the LLM-bot Tinker UI. Edit this file to add or remove presets — no code change required. The 'default' flag marks the entry the UI selects when creating a new LLM bot. Models pull from HuggingFace at first use and cache in ~/.cache/huggingface/.",
+  "presets": [
+    {
+      "label": "Qwen2.5 1.5B Instruct (4-bit) — fast, ~1 GB",
+      "model_path": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+      "description": "Default. Small, fast inference (~300-500ms per intent on M-series). Limited reasoning — outputs are monotonous but functional.",
+      "default": true
+    },
+    {
+      "label": "Qwen2.5 3B Instruct (4-bit) — balanced, ~2 GB",
+      "model_path": "mlx-community/Qwen2.5-3B-Instruct-4bit",
+      "description": "Mid-size. Smarter than 1.5B with similar latency on M-series. Good first upgrade.",
+      "default": false
+    },
+    {
+      "label": "Qwen2.5 7B Instruct (4-bit) — smart, ~4 GB",
+      "model_path": "mlx-community/Qwen2.5-7B-Instruct-4bit",
+      "description": "Diversifies intent output meaningfully but inference is 2-3x slower per call. Strategist tick budget may stretch.",
+      "default": false
+    },
+    {
+      "label": "Llama 3.2 1B Instruct (4-bit) — fast alternative",
+      "model_path": "mlx-community/Llama-3.2-1B-Instruct-4bit",
+      "description": "Llama family at similar size to Qwen 1.5B. Useful for comparing model families.",
+      "default": false
+    },
+    {
+      "label": "Llama 3.2 3B Instruct (4-bit) — Llama mid-size",
+      "model_path": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+      "description": "Llama mid-size, comparable to Qwen 3B.",
+      "default": false
+    }
+  ]
+}
