@@ -14,13 +14,21 @@ per-bot system prompt). All three coexist in a lobby.
 Two top-level areas:
 
 - **Play** (`/lobbies` and `/lobby/:id`) — browse or create a lobby,
-  add bots from the user's library, start race. The actual race
-  screen is `/race?session_id=...` and is reached only through a
-  lobby (no standalone entry point).
+  add bots from the user's library, start race. Lobby create form
+  exposes three track-shape presets: **difficulty** (corner density),
+  **length** (short/medium/long), **curves** (flowing/mixed/twisty).
+  These travel on `LobbySettings` and are reused on every regenerate.
+  The race screen is `/race?session_id=...&lobby_id=...` and is reached
+  only through a lobby (no standalone entry point). The "New Track"
+  button on the race screen sends a `regenerate_track` WS message
+  that swaps the track in-place for everyone in the session (refused
+  while the race is actively RACING — see "Multiplayer track reroll"
+  below). The "Share Lobby" button copies `/lobby/<id>` for invites.
 - **Tinker** (`/tinker`) — unified bot library. Single list with
   `[PY]`/`[LLM]` badges per row. Add wizard asks the kind first,
   then collects kind-specific fields (Monaco editor for Python;
-  model preset dropdown + system_prompt textarea for LLM).
+  model preset dropdown + "Driving strategy" textarea for LLM —
+  see "LLM prompt: strategy vs protocol" below).
 
 The old `/practice`, `/multiplayer`, and `/editor` pages were
 removed; `/editor` redirects to `/tinker` for legacy URLs.
@@ -38,7 +46,7 @@ removed; `/editor` redirects to `/tinker` for legacy URLs.
   `requirements-agents.txt`). Two-tier agent: ~1Hz strategist outputs
   structured Intent JSON, 20Hz deterministic Controller converts
   Intent to engine bool flags.
-- **Testing**: pytest. ~400 tests.
+- **Testing**: pytest. ~430 tests.
 
 ### Frontend
 - **Framework**: React 18 + TypeScript + Vite
@@ -338,9 +346,58 @@ Simulation-style with drift:
 
 Key physics parameters are in `backend/app/config.py`.
 
+### Track shape (config-driven)
+
+`backend/app/config.py` exposes the stage-generator knobs (`STAGE_*`):
+start/end coords, num control points per difficulty, serpentine
+amplitude and frequency. The user-facing **length** and **curves**
+lobby presets multiply/override these — see
+`TrackGenerator.LENGTH_FACTORS` and `CURVES_PRESETS` in
+`backend/app/core/track.py`. Unknown preset strings fall back to
+the config defaults rather than crashing.
+
+### Multiplayer track reroll
+
+The "New Track" button calls `wsRef.regenerateTrack(seed)`. The
+backend handler (`backend/app/api/routes/game.py`) refuses while
+`RaceStatus.RACING`, otherwise generates a new track using the
+lobby's `track_difficulty`/`track_length`/`track_curves`, calls
+`GameEngine.reset_to_new_track(new_track)` (resets cars + race
+state to WAITING), and broadcasts `track_changed`. Clients swap
+the track in `setTrack` so the renderer picks it up immediately;
+nobody is disconnected and bots stay in the session.
+
+### Missed-checkpoint detection
+
+`PlayerState.missed_checkpoint_tick` is set when the driver crosses
+a checkpoint AHEAD of `current_checkpoint` (i.e. skipped one). The
+crossing is NOT credited — the driver still has to go back. The
+field rides on the per-player snapshot; the frontend flashes a red
+banner for ~3s when it sees a new tick value for the local player.
+See `_check_checkpoint_progress` and `_crossed_checkpoint_forward`
+in `backend/app/core/engine.py`.
+
+### LLM prompt: strategy vs protocol
+
+The system prompt sent to MLX is assembled in two parts (see
+`backend/app/agents/llm_strategist.py`):
+
+- `DEFAULT_STRATEGY_PROMPT` — persona + driving heuristics.
+  User-editable via the Tinker "Driving strategy" textarea.
+- `PROTOCOL_PROMPT` — JSON output format, field ranges, examples,
+  "no prose/markdown/code fences". **Invariant**, always appended.
+  Must stay in sync with `_parse_intent` and the `Intent` pydantic
+  model. Not exposed to users.
+
+`build_prompt(observation, system_prompt)` emits
+`<strategy>\n\n<PROTOCOL>\n\nObservation:...`. Existing user-saved
+prompts that still contain old JSON-format boilerplate aren't
+migrated — they're just redundant, since the protocol is appended
+on top regardless.
+
 ## Testing Requirements
 
-### Backend Tests (106 tests)
+### Backend Tests (~430 tests)
 
 ```bash
 cd backend
@@ -390,6 +447,12 @@ npm test
 
 ## Running Locally
 
+Quickest path: `./run_dev.sh` at the repo root starts both servers
+with the right flags and prints the LAN URLs so other devices on
+the Wi-Fi (phone, iPad, another laptop) can connect.
+
+Manual:
+
 ### Backend
 
 ```bash
@@ -397,8 +460,13 @@ cd backend
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Note: `--host 0.0.0.0` is required for any device other than the
+host machine to reach the API (Vite's frontend auto-detects the
+backend on the same hostname:8000 — see
+`frontend/src/config.ts::getApiBaseUrl`).
 
 ### Frontend
 
@@ -408,7 +476,8 @@ npm install
 npm run dev
 ```
 
-Access at http://localhost:5173
+Access at http://localhost:5173 (or `http://<your-LAN-IP>:5173`
+from another device on the same network).
 
 ## Milestones Overview
 
@@ -434,12 +503,18 @@ Access at http://localhost:5173
 
 | File | Purpose |
 |------|---------|
-| `backend/app/config.py` | All game parameters |
+| `backend/app/config.py` | All game parameters (incl. `STAGE_*` track-shape knobs) |
 | `backend/app/core/physics.py` | Physics simulation |
-| `backend/app/core/engine.py` | Main game loop |
+| `backend/app/core/engine.py` | Main game loop; checkpoint + missed-checkpoint detection; `reset_to_new_track` |
+| `backend/app/core/track.py` | Track generation; `LENGTH_FACTORS` / `CURVES_PRESETS` |
+| `backend/app/core/lobby.py` | `LobbySettings` (incl. `track_length`, `track_curves`) |
+| `backend/app/api/routes/game.py` | Game WS; `regenerate_track` handler; `_serialize_track` |
+| `backend/app/agents/llm_strategist.py` | `DEFAULT_STRATEGY_PROMPT` + invariant `PROTOCOL_PROMPT`; `build_prompt` |
 | `backend/app/bot_runtime/sandbox.py` | Bot execution |
-| `frontend/src/game/renderer.js` | Canvas rendering |
+| `frontend/src/game/renderer.ts` | Canvas rendering (stylized cars, drift/nitro effects) |
 | `frontend/src/game/input.js` | Keyboard handling |
+| `frontend/src/services/gameWebSocket.ts` | WS client; `track_changed`, `regenerateTrack` |
+| `frontend/src/pages/MultiplayerRace.tsx` | Race screen; missed-checkpoint banner; Share Lobby / New Track buttons |
 
 ## Common Tasks
 
