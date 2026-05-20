@@ -120,9 +120,13 @@ POST /lobbies                                       # Create
   Body: {
     "name": "Rally Night",
     "host_player_id": "alice",
-    "track_difficulty": "medium",
+    "track_difficulty": "medium",   # easy | medium | hard | extreme
+    "track_length": "medium",       # short | medium | long
+    "track_curves": "mixed",        # flowing | mixed | twisty
+    "track_seed": null,             # int or null for random
     "max_players": 8
   }
+  # PUT /lobbies/{id}/settings accepts the same three track_* fields.
 GET  /lobbies/{id}                                  # Get lobby state
 PUT  /lobbies/{id}/settings?player_id=alice         # Host updates settings
 DELETE /lobbies/{id}?player_id=alice                # Disband (host OR creator)
@@ -153,8 +157,17 @@ WS /game/ws?session_id=<id>&player_id=<name>&spectate=true # Spectate race
   "turn_left": false, "turn_right": true,
   "nitro": false
 }}
+{"type": "regenerate_track", "data": {"seed": 12345}}
 {"type": "pong"}
 ```
+
+`regenerate_track` rerolls the track for the current session in
+place — every connected member is moved back to the start line on a
+freshly generated stage and receives a `track_changed` broadcast
+(see below). The server uses the lobby's `track_difficulty` /
+`track_length` / `track_curves` as the shape recipe and only the
+seed changes. Refused with an `error` message while the race is
+actively `RACING`; allowed in `WAITING`, `COUNTDOWN`, `FINISHED`.
 
 The mid-race `submit_bot` message and the LLM-specific
 `add_llm_bot_to_lobby` message were removed when the Tinker / lobby
@@ -188,6 +201,12 @@ with a `bot_id` from the user's library.
   "session_id": "…", "player_id": "…", "track": {…}
 }}
 
+// Track rerolled for the whole session (sent after a successful
+// regenerate_track). Clients should swap the new track into their
+// renderer state; cars are reset server-side and the next game_state
+// will arrive with everyone back at the new start line.
+{"type": "track_changed", "data": {"track": {…track payload…}}}
+
 // Per-tick broadcast (60 Hz). Per-player carries optional agent_intent
 // only for LLM-driven cars.
 {"type": "game_state", "data": {
@@ -215,6 +234,7 @@ with a `bot_id` from the user's library.
       },
       "current_checkpoint": 2,
       "split_times": [10.3, 22.7],
+      "missed_checkpoint_tick": null,   // server tick of last skipped CP, or null
       "is_finished": false,
       "finish_time": null,
       "is_off_track": false,

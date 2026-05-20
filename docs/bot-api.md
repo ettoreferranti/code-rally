@@ -509,10 +509,18 @@ strategy. You don't write code for these — you configure two things:
 
 - a **model path** (chosen from a curated dropdown of MLX
   `mlx-community/...` models, or a free-text custom path), and
-- a **system prompt** that tells the model how to race.
+- a **driving strategy** prompt that describes how the bot drives
+  (persona, risk appetite, surface heuristics).
 
-A new LLM bot in Tinker pre-fills the system prompt with the
-default racing prompt so you can tweak rather than start from scratch.
+You only write the strategy. The JSON I/O contract that the
+controller needs to parse (`target_speed_kmh`, `racing_line_offset_m`,
+`aggression`, "output JSON only, no prose/markdown/code fences") is
+held in an invariant `PROTOCOL_PROMPT` that the server always appends
+on top of your strategy — so a typo in your prompt can't accidentally
+break the bot's I/O contract. See `backend/app/agents/llm_strategist.py::build_prompt`.
+
+A new LLM bot in Tinker pre-fills the strategy with the default
+racing persona so you can tweak rather than start from scratch.
 
 Architecturally the LLM bot uses a two-tier setup:
 
@@ -532,7 +540,8 @@ add-bot dispatch.
 
 To create one: open **Tinker → New bot → LLM bot**. Fill in the name,
 pick a model from the dropdown (or paste a custom HuggingFace path),
-and edit the system prompt to taste. Then race it like any other bot.
+and edit the driving strategy to taste. Then race it like any other
+bot.
 
 MLX is an Apple-Silicon-only optional dependency. Install it once
 with `pip install -r backend/requirements-agents.txt`; without it,
