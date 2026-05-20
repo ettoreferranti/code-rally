@@ -103,11 +103,13 @@ const LobbyWaitingRoom: React.FC = () => {
           break;
 
         case 'race_starting': {
-          // Race is starting - navigate to race page with session and player ID
+          // Race is starting - navigate to race page with session, player and lobby ID.
+          // lobby_id lets the race page show a "Share Lobby" link back to /lobby/<id>.
           const gameSessionId = message.data.game_session_id;
           const playerIdParam = username ? `&player_id=${encodeURIComponent(username)}` : '';
           const spectateParam = isSpectator ? '&spectate=true' : '';
-          navigate(`/race?session_id=${gameSessionId}${playerIdParam}${spectateParam}`);
+          const lobbyIdParam = lobbyId ? `&lobby_id=${encodeURIComponent(lobbyId)}` : '';
+          navigate(`/race?session_id=${gameSessionId}${playerIdParam}${spectateParam}${lobbyIdParam}`);
           break;
         }
 
@@ -272,6 +274,10 @@ const LobbyWaitingRoom: React.FC = () => {
             )}
             <span>•</span>
             <span>Difficulty: {lobbyState.settings.track_difficulty}</span>
+            <span>•</span>
+            <span>Length: {lobbyState.settings.track_length}</span>
+            <span>•</span>
+            <span>Curves: {lobbyState.settings.track_curves}</span>
             {isHost && (
               <>
                 <span>•</span>
@@ -353,6 +359,14 @@ const LobbyWaitingRoom: React.FC = () => {
                 <p>
                   <span className="font-semibold">Track Difficulty:</span>{' '}
                   {lobbyState.settings.track_difficulty}
+                </p>
+                <p>
+                  <span className="font-semibold">Track Length:</span>{' '}
+                  {lobbyState.settings.track_length}
+                </p>
+                <p>
+                  <span className="font-semibold">Track Curves:</span>{' '}
+                  {lobbyState.settings.track_curves}
                 </p>
                 <p>
                   <span className="font-semibold">Track Seed:</span>{' '}

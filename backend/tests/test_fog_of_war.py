@@ -20,9 +20,15 @@ def settings():
 
 @pytest.fixture
 def test_track():
-    """Generate a simple test track."""
+    """Generate a simple test track.
+
+    Obstacles are cleared so fog-of-war tests that place stationary cars
+    at fixed positions aren't perturbed by random obstacle collisions.
+    """
     generator = TrackGenerator(seed=42)
-    return generator.generate(difficulty='easy')
+    track = generator.generate(difficulty='easy')
+    track.obstacles = []
+    return track
 
 
 @pytest.fixture

@@ -152,30 +152,41 @@ class TestBuildPrompt:
         assert "speed=80 km/h" in prompt
         assert "next checkpoint 100m ahead" in prompt
 
-    def test_custom_system_prompt_overrides_default(self):
-        # Custom prompt replaces the default. We don't enforce content
-        # because Tinker users may write whatever they want.
-        custom = "You are a CRAZY rally driver. Output {} JSON only."
+    def test_custom_strategy_overrides_default_persona(self):
+        # Custom strategy text replaces the default persona/heuristics.
+        custom = "You are a CRAZY rally driver."
         prompt = build_prompt(
             "speed=80 km/h, surface=ice",
             system_prompt=custom,
         )
         assert custom in prompt
-        # The default's wording must NOT be present when a custom prompt
-        # is given — otherwise the override isn't really an override.
+        # The default persona must NOT be present when a custom one is given.
         assert "Top speed is around 180 km/h" not in prompt
         # Observation still flows through.
         assert "speed=80 km/h" in prompt
 
-    def test_default_system_prompt_is_exported(self):
-        # Tinker UI needs to pre-fill the system_prompt textarea with the
-        # default when creating a new LLM bot. The default must be
-        # importable as a constant.
-        from app.agents.llm_strategist import DEFAULT_SYSTEM_PROMPT
+    def test_protocol_is_always_appended_even_with_custom_strategy(self):
+        # The JSON I/O contract must reach the model regardless of what
+        # the user wrote in their strategy — otherwise a forgotten
+        # JSON instruction silently breaks the bot.
+        prompt = build_prompt(
+            "speed=10 km/h",
+            system_prompt="Drive carefully.",
+        )
+        assert "target_speed_kmh" in prompt
+        assert "racing_line_offset_m" in prompt
+        assert "aggression" in prompt
+        assert "No prose, no markdown, no code fences" in prompt
 
-        assert isinstance(DEFAULT_SYSTEM_PROMPT, str)
-        assert "rally" in DEFAULT_SYSTEM_PROMPT.lower()
-        assert "target_speed_kmh" in DEFAULT_SYSTEM_PROMPT
+    def test_default_strategy_is_exported(self):
+        # Tinker UI pre-fills the strategy textarea with this constant.
+        from app.agents.llm_strategist import DEFAULT_STRATEGY_PROMPT
+
+        assert isinstance(DEFAULT_STRATEGY_PROMPT, str)
+        assert "rally" in DEFAULT_STRATEGY_PROMPT.lower()
+        # The default strategy is strategy-only — no protocol leakage.
+        assert "target_speed_kmh" not in DEFAULT_STRATEGY_PROMPT
+        assert "JSON" not in DEFAULT_STRATEGY_PROMPT
 
     def test_instructs_json_only_output(self):
         prompt = build_prompt("anything")

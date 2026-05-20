@@ -18,6 +18,8 @@ const LobbyBrowser: React.FC = () => {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newLobbyName, setNewLobbyName] = useState('');
   const [difficulty, setDifficulty] = useState('medium');
+  const [trackLength, setTrackLength] = useState('medium');
+  const [trackCurves, setTrackCurves] = useState('mixed');
   const [maxPlayers, setMaxPlayers] = useState(8);
   const [creating, setCreating] = useState(false);
 
@@ -66,6 +68,8 @@ const LobbyBrowser: React.FC = () => {
         name: newLobbyName,
         host_player_id: username,
         track_difficulty: difficulty,
+        track_length: trackLength,
+        track_curves: trackCurves,
         max_players: maxPlayers,
       });
 
@@ -98,8 +102,9 @@ const LobbyBrowser: React.FC = () => {
 
   const handleSpectateLobby = (lobby: LobbyListItem) => {
     if (lobby.status === 'racing' && lobby.game_session_id) {
-      // Racing lobby - go directly to race as spectator
-      navigate(`/race?session_id=${lobby.game_session_id}&spectate=true`);
+      // Racing lobby - go directly to race as spectator. Pass lobby_id
+      // so the race page can offer a "Share Lobby" link back here.
+      navigate(`/race?session_id=${lobby.game_session_id}&spectate=true&lobby_id=${encodeURIComponent(lobby.lobby_id)}`);
     } else {
       // Waiting lobby - go to waiting room as spectator
       navigate(`/lobby/${lobby.lobby_id}?spectate=true`);
@@ -273,6 +278,34 @@ const LobbyBrowser: React.FC = () => {
                   <option value="medium">Medium</option>
                   <option value="hard">Hard</option>
                   <option value="extreme">Extreme</option>
+                </select>
+              </div>
+
+              {/* Track Length */}
+              <div className="mb-4">
+                <label className="block text-sm font-semibold mb-2">Track Length</label>
+                <select
+                  value={trackLength}
+                  onChange={(e) => setTrackLength(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+                >
+                  <option value="short">Short</option>
+                  <option value="medium">Medium</option>
+                  <option value="long">Long</option>
+                </select>
+              </div>
+
+              {/* Track Curves */}
+              <div className="mb-4">
+                <label className="block text-sm font-semibold mb-2">Track Curves</label>
+                <select
+                  value={trackCurves}
+                  onChange={(e) => setTrackCurves(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+                >
+                  <option value="flowing">Flowing</option>
+                  <option value="mixed">Mixed</option>
+                  <option value="twisty">Twisty</option>
                 </select>
               </div>
 

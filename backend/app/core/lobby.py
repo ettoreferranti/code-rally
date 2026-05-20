@@ -24,6 +24,8 @@ class LobbyStatus(Enum):
 class LobbySettings:
     """Configurable lobby settings."""
     track_difficulty: str = "medium"  # easy, medium, hard, extreme
+    track_length: str = "medium"      # short, medium, long
+    track_curves: str = "mixed"       # flowing, mixed, twisty
     track_seed: Optional[int] = None  # Random if None
     max_players: int = 8
     finish_grace_period: int = 30  # Seconds after first finisher

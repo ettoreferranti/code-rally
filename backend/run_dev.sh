@@ -27,6 +27,16 @@ echo ""
 echo "Starting server..."
 echo "API will be available at: http://localhost:8000"
 echo "API docs will be available at: http://localhost:8000/docs"
+
+# Detect the LAN IP of the interface used for the default route
+DEFAULT_IFACE=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
+if [ -n "$DEFAULT_IFACE" ]; then
+    LAN_IP=$(ipconfig getifaddr "$DEFAULT_IFACE" 2>/dev/null || true)
+    if [ -n "$LAN_IP" ]; then
+        echo "LAN (share with other devices on this Wi-Fi): http://${LAN_IP}:8000"
+    fi
+fi
+
 echo "Press Ctrl+C to stop the server"
 echo ""
 

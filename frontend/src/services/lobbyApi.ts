@@ -10,6 +10,8 @@ const API_BASE_URL = getApiBaseUrl();
 
 export interface LobbySettings {
   track_difficulty: string;
+  track_length: string;   // "short" | "medium" | "long"
+  track_curves: string;   // "flowing" | "mixed" | "twisty"
   track_seed: number | null;
   max_players: number;
   finish_grace_period: number;
@@ -61,12 +63,16 @@ export interface CreateLobbyRequest {
   name: string;
   host_player_id: string;
   track_difficulty?: string;
+  track_length?: string;
+  track_curves?: string;
   track_seed?: number;
   max_players?: number;
 }
 
 export interface UpdateSettingsRequest {
   track_difficulty?: string;
+  track_length?: string;
+  track_curves?: string;
   track_seed?: number;
   max_players?: number;
 }

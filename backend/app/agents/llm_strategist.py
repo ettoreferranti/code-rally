@@ -35,11 +35,22 @@ GenerateFn = Callable[[str], Awaitable[str]]
 _MIN_TARGET_SPEED_KMH = 30.0
 
 
-DEFAULT_SYSTEM_PROMPT = (
+# User-editable: persona + driving heuristics. Surfaces in the Tinker UI
+# as the "Driving strategy" textarea. Customise freely — the I/O contract
+# below is always appended on top, so the model still sees the JSON
+# format requirements even if the strategy text doesn't mention them.
+DEFAULT_STRATEGY_PROMPT = (
     "You are a rally driver racing to finish the stage AS FAST AS POSSIBLE. "
     "Top speed is around 180 km/h. Wet, gravel, and ice surfaces reduce "
     "grip but you still race — pick a safer speed and a wider racing line, "
-    "but never stop.\n\n"
+    "but never stop."
+)
+
+# Invariant. Must stay in sync with ``_parse_intent`` and the ``Intent``
+# pydantic model — anything that loosens these constraints risks the
+# controller silently falling back to defaults on parse failures.
+# NOT exposed to users.
+PROTOCOL_PROMPT = (
     "Given the observation, decide your driving intent for the next second.\n\n"
     "Output ONLY a JSON object with these fields:\n"
     '  "target_speed_kmh": number between 40 and 200\n'
@@ -60,14 +71,19 @@ DEFAULT_SYSTEM_PROMPT = (
 def build_prompt(observation: str, system_prompt: Optional[str] = None) -> str:
     """Assemble the full prompt sent to the generation backend.
 
+    Layout: <strategy>\\n\\n<PROTOCOL>\\n\\nObservation:\\n...
+    The protocol section is always appended so user-supplied strategies
+    can't accidentally break the JSON contract.
+
     Args:
         observation: The formatted observation string for this tick.
-        system_prompt: Optional per-bot system-prompt override (Tinker
-            UI lets users edit this). Defaults to ``DEFAULT_SYSTEM_PROMPT``.
+        system_prompt: Optional per-bot strategy text (Tinker UI lets
+            users edit this). Defaults to ``DEFAULT_STRATEGY_PROMPT``.
     """
-    base = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
+    strategy = system_prompt if system_prompt is not None else DEFAULT_STRATEGY_PROMPT
     return (
-        f"{base}\n\n"
+        f"{strategy}\n\n"
+        f"{PROTOCOL_PROMPT}\n\n"
         f"Observation:\n{observation}\n\n"
         f"Intent JSON:"
     )
@@ -83,9 +99,10 @@ class LLMStrategist:
             without loading a real model.
         tick_interval_s: how often the background loop calls generate_fn.
         timeout_s: per-call timeout. Timeouts are dropped, not raised.
-        system_prompt: optional per-bot system prompt. None → use
-            ``DEFAULT_SYSTEM_PROMPT``. Set by the Tinker UI when the LLM
-            bot stored its own prompt.
+        system_prompt: optional per-bot driving-strategy text. None →
+            use ``DEFAULT_STRATEGY_PROMPT``. Set by the Tinker UI when
+            the LLM bot stored its own strategy. The I/O protocol is
+            always appended on top of this; see ``build_prompt``.
     """
 
     def __init__(

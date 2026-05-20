@@ -368,3 +368,51 @@ class TestTrackGenerator:
         # Should have both straights and curves
         assert straight_count > 0
         assert curved_count > 0
+
+
+class TestLengthAndCurvesPresets:
+    """Verify lobby-level length/curves presets affect generation as expected."""
+
+    def _gen(self, **kwargs):
+        # Fixed seed so the only difference between calls is the preset.
+        from app.core.track import TrackGenerator
+        return TrackGenerator(seed=42).generate(**kwargs)
+
+    def test_long_is_longer_than_short(self):
+        # Long stage has 3x the Y-span of short. The ratio in total_length
+        # is smaller because shorter stages get proportionally more
+        # tortuous (same serpentine amplitude squeezed into less span),
+        # but long should still be at least 50% longer.
+        short = self._gen(length='short')
+        long = self._gen(length='long')
+        assert long.total_length > short.total_length * 1.5
+
+    def test_medium_is_between_short_and_long(self):
+        short = self._gen(length='short')
+        medium = self._gen(length='medium')
+        long = self._gen(length='long')
+        assert short.total_length < medium.total_length < long.total_length
+
+    def test_twisty_has_more_segments_changing_direction(self):
+        """Twisty preset uses a higher serpentine frequency, so the
+        x-coordinate of consecutive segment endpoints should change
+        direction more often than the flowing preset."""
+        flowing = self._gen(curves='flowing')
+        twisty = self._gen(curves='twisty')
+
+        def direction_changes(track):
+            xs = [seg.end.x for seg in track.segments]
+            count = 0
+            for i in range(1, len(xs) - 1):
+                if (xs[i] - xs[i - 1]) * (xs[i + 1] - xs[i]) < 0:
+                    count += 1
+            return count
+
+        assert direction_changes(twisty) > direction_changes(flowing)
+
+    def test_invalid_preset_falls_back_to_default(self):
+        # Unknown preset shouldn't crash; should behave like medium/mixed.
+        default = self._gen()
+        bogus = self._gen(length='bogus', curves='bogus')
+        # Same seed + same effective preset → same total_length.
+        assert abs(bogus.total_length - default.total_length) < 1e-6

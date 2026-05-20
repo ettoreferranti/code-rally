@@ -31,23 +31,15 @@ import {
 
 type AddDialog = null | 'choose' | 'python' | 'llm';
 
-const DEFAULT_LLM_SYSTEM_PROMPT = (
-  // Pre-filled into the system-prompt textarea for new LLM bots so users
-  // can tweak rather than start from scratch. Mirrors the backend default
-  // (DEFAULT_SYSTEM_PROMPT in app/agents/llm_strategist.py).
+const DEFAULT_LLM_STRATEGY_PROMPT = (
+  // Pre-filled into the strategy textarea for new LLM bots. Mirrors
+  // DEFAULT_STRATEGY_PROMPT in app/agents/llm_strategist.py.
+  // The JSON I/O contract is handled by the backend and is NOT shown
+  // here — users should only describe how the bot drives.
   'You are a rally driver racing to finish the stage AS FAST AS POSSIBLE. ' +
   'Top speed is around 180 km/h. Wet, gravel, and ice surfaces reduce ' +
   "grip but you still race — pick a safer speed and a wider racing line, " +
-  'but never stop.\n\n' +
-  'Given the observation, decide your driving intent for the next second.\n\n' +
-  'Output ONLY a JSON object with these fields:\n' +
-  '  "target_speed_kmh": number between 40 and 200\n' +
-  '     (40-70 on tight corners or low-grip surfaces; 80-130 on flowing\n' +
-  '     corners; 130-180 on straights. NEVER output less than 40.)\n' +
-  '  "racing_line_offset_m": number between -10 and 10 (negative = left of centre)\n' +
-  '  "aggression": number between 0.3 and 1.0 ' +
-  '(0.3 = careful, 1.0 = full attack; use 0.5+ on most segments)\n\n' +
-  'Output nothing else. No prose, no markdown, no code fences.'
+  'but never stop.'
 );
 
 export default function Tinker() {
@@ -78,7 +70,7 @@ export default function Tinker() {
   const [modelPresets, setModelPresets] = useState<ModelPreset[]>([]);
   const [newLlmModel, setNewLlmModel] = useState('');
   const [newLlmCustomMode, setNewLlmCustomMode] = useState(false);
-  const [newLlmSystemPrompt, setNewLlmSystemPrompt] = useState(DEFAULT_LLM_SYSTEM_PROMPT);
+  const [newLlmSystemPrompt, setNewLlmSystemPrompt] = useState(DEFAULT_LLM_STRATEGY_PROMPT);
 
   // If we landed without a user, defer to the global UserSwitcher.
   useEffect(() => {
@@ -261,7 +253,7 @@ export default function Tinker() {
       setAddDialog(null);
       setNewName('');
       setNewLlmCustomMode(false);
-      setNewLlmSystemPrompt(DEFAULT_LLM_SYSTEM_PROMPT);
+      setNewLlmSystemPrompt(DEFAULT_LLM_STRATEGY_PROMPT);
       const defaultPreset = modelPresets.find((p) => p.default) ?? modelPresets[0];
       if (defaultPreset) setNewLlmModel(defaultPreset.model_path);
       await refreshBotList();
@@ -428,11 +420,16 @@ export default function Tinker() {
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-semibold mb-1">System prompt</label>
+                <label className="block text-sm font-semibold mb-1">Driving strategy</label>
+                <p className="mb-1 text-xs text-gray-400">
+                  Describe <em>how</em> this bot should drive (persona, risk
+                  appetite, surface heuristics). The JSON output format is
+                  handled by the system — you don't need to mention it.
+                </p>
                 <textarea
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  rows={12}
+                  rows={8}
                   className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-xs font-mono"
                   data-testid="llm-edit-prompt"
                 />
@@ -607,10 +604,10 @@ export default function Tinker() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-1">
-                    System prompt
+                    Driving strategy
                     <button
                       type="button"
-                      onClick={() => setNewLlmSystemPrompt(DEFAULT_LLM_SYSTEM_PROMPT)}
+                      onClick={() => setNewLlmSystemPrompt(DEFAULT_LLM_STRATEGY_PROMPT)}
                       className="ml-2 text-xs text-blue-400 hover:text-blue-300 font-normal"
                     >
                       reset to default
@@ -619,12 +616,14 @@ export default function Tinker() {
                   <textarea
                     value={newLlmSystemPrompt}
                     onChange={(e) => setNewLlmSystemPrompt(e.target.value)}
-                    rows={10}
+                    rows={6}
                     className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-xs font-mono"
                     data-testid="new-llm-prompt"
                   />
                   <p className="mt-1 text-xs text-gray-400">
-                    The strategist sees this on every tick. Keep the JSON-output instructions intact.
+                    Just describe how this bot should drive — persona, risk
+                    appetite, surface heuristics. The JSON output format is
+                    handled by the system.
                   </p>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">

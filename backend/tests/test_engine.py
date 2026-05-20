@@ -11,8 +11,59 @@ Tests cover:
 import pytest
 from app.core.engine import GameEngine, PlayerInput, RaceStatus
 from app.core.physics import Vector2, CarState
-from app.core.track import TrackGenerator
+from app.core.track import (
+    TrackGenerator, Track, TrackPoint, TrackSegment, Checkpoint,
+    SurfaceType, ContainmentBoundary,
+)
 from app.config import get_settings
+
+
+def _make_straight_track(length: float = 4000.0, width: float = 200.0) -> Track:
+    """Build a long, perfectly-straight track for speed-mechanic tests
+    that should not be affected by corner geometry."""
+    start = TrackPoint(x=0, y=0, width=width, surface=SurfaceType.ASPHALT)
+    end = TrackPoint(x=length, y=0, width=width, surface=SurfaceType.ASPHALT)
+    return Track(
+        segments=[TrackSegment(start=start, end=end)],
+        checkpoints=[Checkpoint(position=(length, 0), width=width, angle=0, index=0)],
+        start_position=(10.0, 0.0),
+        start_heading=0.0,
+        finish_position=(length, 0.0),
+        finish_heading=0.0,
+        total_length=length,
+        is_looping=False,
+        containment=ContainmentBoundary(
+            left_points=[(0, -width / 2), (length, -width / 2)],
+            right_points=[(0, width / 2), (length, width / 2)],
+        ),
+        obstacles=[],
+    )
+
+
+def _make_multi_checkpoint_track(num_cps: int = 4, spacing: float = 200.0, width: float = 200.0) -> Track:
+    """Straight track with `num_cps` evenly spaced checkpoints along +X."""
+    length = spacing * (num_cps + 1)
+    start = TrackPoint(x=0, y=0, width=width, surface=SurfaceType.ASPHALT)
+    end = TrackPoint(x=length, y=0, width=width, surface=SurfaceType.ASPHALT)
+    checkpoints = [
+        Checkpoint(position=(spacing * (i + 1), 0.0), width=width, angle=0.0, index=i)
+        for i in range(num_cps)
+    ]
+    return Track(
+        segments=[TrackSegment(start=start, end=end)],
+        checkpoints=checkpoints,
+        start_position=(10.0, 0.0),
+        start_heading=0.0,
+        finish_position=(length, 0.0),
+        finish_heading=0.0,
+        total_length=length,
+        is_looping=False,
+        containment=ContainmentBoundary(
+            left_points=[(0, -width / 2), (length, -width / 2)],
+            right_points=[(0, width / 2), (length, width / 2)],
+        ),
+        obstacles=[],
+    )
 
 
 def advance_countdown(engine, settings):
@@ -295,8 +346,13 @@ class TestNitroBoost:
         assert not player.car.nitro_active
         assert player.car.nitro_remaining_ticks == 0
 
-    def test_nitro_speed_boost(self, engine, settings):
-        """Test that nitro allows higher speeds than normal."""
+    def test_nitro_speed_boost(self, settings):
+        """Test that nitro allows higher speeds than normal.
+
+        Uses a long straight synthetic track so the comparison isn't
+        confounded by corner-induced speed caps.
+        """
+        engine = GameEngine(_make_straight_track())
         player_id = "test_player"
         engine.add_player(player_id)
         engine.start_race()
@@ -430,3 +486,138 @@ class TestRaceLifecycle:
         engine._update_race_status()
 
         assert player.is_finished
+
+
+class TestMissedCheckpointWarning:
+    """Skipping a checkpoint should flag the player without crediting the later one."""
+
+    def _make_engine(self, num_cps=4):
+        engine = GameEngine(_make_multi_checkpoint_track(num_cps=num_cps))
+        engine.add_player("p1")
+        return engine
+
+    def test_skipping_ahead_sets_missed_tick_and_does_not_credit(self):
+        engine = self._make_engine()
+        player = engine.state.players["p1"]
+        # Seed prev_position just before checkpoint 0, then teleport past CP 2.
+        player._prev_position = Vector2(150.0, 0.0)
+        player.car.position = Vector2(650.0, 0.0)  # past CP 0 (200), CP 1 (400), CP 2 (600)
+        engine.state.tick = 42
+
+        engine._check_checkpoint_progress(player)
+
+        # We crossed CP 0 in the normal path AND would have crossed 1 and 2.
+        # The "normal" branch credits CP 0; the skip-detection branch should
+        # NOT fire because the normal cross succeeded for the *next* CP.
+        assert player.current_checkpoint == 1
+        assert player.missed_checkpoint_tick is None
+
+    def test_skipping_with_next_unreached_raises_warning(self):
+        # Pretend the player has already cleared CP 0 (current=1), then
+        # teleport across CP 2 *without* crossing CP 1 (e.g. cut corner).
+        engine = self._make_engine()
+        player = engine.state.players["p1"]
+        player.current_checkpoint = 1
+
+        # Move from (450, -200) to (650, -200): crosses CP 2's line at x=600
+        # (the y is off-center but inside the CP width of 200).
+        # CP 1 is at x=400, so we are PAST it without having crossed it
+        # (since prev_x=450 > 400).
+        player._prev_position = Vector2(450.0, -50.0)
+        player.car.position = Vector2(650.0, -50.0)
+        engine.state.tick = 99
+
+        engine._check_checkpoint_progress(player)
+
+        # No credit, warning raised.
+        assert player.current_checkpoint == 1
+        assert player.missed_checkpoint_tick == 99
+
+    def test_reverse_crossing_does_not_trigger_warning(self):
+        engine = self._make_engine()
+        player = engine.state.players["p1"]
+        player.current_checkpoint = 1
+        # Travel backwards across CP 2 (right-to-left): not "forward".
+        player._prev_position = Vector2(650.0, 0.0)
+        player.car.position = Vector2(450.0, 0.0)
+        engine.state.tick = 50
+
+        engine._check_checkpoint_progress(player)
+
+        assert player.missed_checkpoint_tick is None
+
+
+class TestResetToNewTrack:
+    """Test the multiplayer "New Track" reroll path on GameEngine."""
+
+    def _fresh_track(self, seed: int):
+        return TrackGenerator(seed=seed).generate(difficulty='easy')
+
+    def test_swaps_track_instance(self, engine):
+        new_track = self._fresh_track(seed=999)
+        assert engine.state.track is not new_track
+        engine.reset_to_new_track(new_track)
+        assert engine.state.track is new_track
+
+    def test_cars_moved_to_new_start_position(self, engine, settings):
+        engine.add_player("p1")
+        # Drive the car somewhere off the start line.
+        player = engine.state.players["p1"]
+        player.car.position = Vector2(123.0, 456.0)
+        player.car.velocity = Vector2(10.0, 5.0)
+        player.car.is_drifting = True
+
+        new_track = self._fresh_track(seed=999)
+        engine.reset_to_new_track(new_track)
+
+        assert player.car.position.x == new_track.start_position[0]
+        assert player.car.position.y == new_track.start_position[1]
+        assert player.car.velocity.x == 0
+        assert player.car.velocity.y == 0
+        assert player.car.heading == new_track.start_heading
+        assert player.car.is_drifting is False
+
+    def test_status_returns_to_waiting_from_finished(self, engine, settings):
+        engine.add_player("p1")
+        engine.state.race_info.status = RaceStatus.FINISHED
+        engine.state.race_info.finish_time = 42.0
+
+        engine.reset_to_new_track(self._fresh_track(seed=7))
+
+        assert engine.state.race_info.status == RaceStatus.WAITING
+        assert engine.state.race_info.finish_time is None
+        assert engine.state.race_info.start_time is None
+
+    def test_race_progress_cleared(self, engine, settings):
+        engine.add_player("p1")
+        player = engine.state.players["p1"]
+        player.current_checkpoint = 3
+        player.checkpoints_passed = {0, 1, 2}
+        player.split_times = [1.0, 2.0, 3.0]
+        player.is_finished = True
+        player.finish_time = 10.0
+        player.points = 25
+        player.dnf = True
+
+        engine.reset_to_new_track(self._fresh_track(seed=7))
+
+        assert player.current_checkpoint == 0
+        assert player.checkpoints_passed == set()
+        assert player.split_times == []
+        assert player.is_finished is False
+        assert player.finish_time is None
+        assert player.points == 0
+        assert player.dnf is False
+
+    def test_nitro_reset_to_default(self, engine, settings):
+        engine.add_player("p1")
+        player = engine.state.players["p1"]
+        player.car.nitro_charges = 0
+        player.car.nitro_active = True
+        player.car.nitro_remaining_ticks = 50
+
+        engine.reset_to_new_track(self._fresh_track(seed=7))
+
+        assert player.car.nitro_charges == settings.car.DEFAULT_NITRO_CHARGES
+        assert player.car.nitro_active is False
+        assert player.car.nitro_remaining_ticks == 0

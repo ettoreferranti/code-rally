@@ -28,6 +28,8 @@ class CreateLobbyRequest(BaseModel):
     """Request to create a new lobby."""
     name: str = Field(..., min_length=1, max_length=50, description="Lobby display name")
     track_difficulty: str = Field(default="medium", description="Track difficulty (easy, medium, hard, extreme)")
+    track_length: str = Field(default="medium", description="Track length preset (short, medium, long)")
+    track_curves: str = Field(default="mixed", description="Track curves preset (flowing, mixed, twisty)")
     track_seed: Optional[int] = Field(default=None, description="Track seed for reproducible generation")
     max_players: int = Field(default=8, ge=1, le=8, description="Maximum players allowed")
     host_player_id: str = Field(..., description="Player ID of lobby creator")
@@ -36,6 +38,8 @@ class CreateLobbyRequest(BaseModel):
 class UpdateSettingsRequest(BaseModel):
     """Request to update lobby settings."""
     track_difficulty: Optional[str] = Field(default=None, description="Track difficulty")
+    track_length: Optional[str] = Field(default=None, description="Track length preset")
+    track_curves: Optional[str] = Field(default=None, description="Track curves preset")
     track_seed: Optional[int] = Field(default=None, description="Track seed")
     max_players: Optional[int] = Field(default=None, ge=1, le=8, description="Maximum players")
 
@@ -52,6 +56,8 @@ class LobbyMemberResponse(BaseModel):
 class LobbySettingsResponse(BaseModel):
     """Lobby settings response."""
     track_difficulty: str
+    track_length: str
+    track_curves: str
     track_seed: Optional[int]
     max_players: int
     finish_grace_period: int
@@ -99,6 +105,8 @@ def _lobby_to_response(lobby) -> LobbyResponse:
         creator_player_id=lobby.creator_player_id,
         settings=LobbySettingsResponse(
             track_difficulty=lobby.settings.track_difficulty,
+            track_length=lobby.settings.track_length,
+            track_curves=lobby.settings.track_curves,
             track_seed=lobby.settings.track_seed,
             max_players=lobby.settings.max_players,
             finish_grace_period=lobby.settings.finish_grace_period
@@ -159,6 +167,8 @@ async def create_lobby(request: CreateLobbyRequest):
         # Create lobby settings
         settings = LobbySettings(
             track_difficulty=request.track_difficulty,
+            track_length=request.track_length,
+            track_curves=request.track_curves,
             track_seed=request.track_seed,
             max_players=request.max_players
         )
@@ -291,6 +301,8 @@ async def update_lobby_settings(
     # Build new settings (only update provided fields)
     new_settings = LobbySettings(
         track_difficulty=request.track_difficulty or lobby.settings.track_difficulty,
+        track_length=request.track_length or lobby.settings.track_length,
+        track_curves=request.track_curves or lobby.settings.track_curves,
         track_seed=request.track_seed if request.track_seed is not None else lobby.settings.track_seed,
         max_players=request.max_players or lobby.settings.max_players,
         finish_grace_period=lobby.settings.finish_grace_period

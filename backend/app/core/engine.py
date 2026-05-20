@@ -66,6 +66,10 @@ class PlayerState:
     position: Optional[int] = None  # Final race position (1st, 2nd, etc.)
     points: int = 0  # Points awarded for this race
     dnf: bool = False  # Did Not Finish
+    # Tick at which this driver crossed a checkpoint AHEAD of their
+    # current target (i.e. they skipped one). Frontend uses this to
+    # flash a red "missed checkpoint" banner for a few seconds.
+    missed_checkpoint_tick: Optional[int] = None
 
     # Bot-specific fields
     is_bot: bool = False  # Whether this player is controlled by a bot
@@ -326,6 +330,48 @@ class GameEngine:
             player.position = None
             player.points = 0
             player.dnf = False
+            player.missed_checkpoint_tick = None
+
+    def reset_to_new_track(self, new_track: 'Track') -> None:
+        """Swap in a new track and reset all cars + race state to WAITING.
+
+        Used by the multiplayer "New Track" reroll. Caller is responsible
+        for refusing the reset while the race is in progress.
+        """
+        self.state.track = new_track
+
+        self.state.race_info.status = RaceStatus.WAITING
+        self.state.race_info.countdown_remaining = 0.0
+        self.state.race_info.start_time = None
+        self.state.race_info.finish_time = None
+        self.state.race_info.first_finisher_time = None
+        self.state.race_info.grace_period_remaining = 0.0
+
+        for player in self.state.players.values():
+            player.car.position = Vector2(
+                new_track.start_position[0],
+                new_track.start_position[1]
+            )
+            player.car.velocity = Vector2(0, 0)
+            player.car.heading = new_track.start_heading
+            player.car.angular_velocity = 0
+            player.car.is_drifting = False
+            player.car.drift_angle = 0
+            player.car.throttle = 0
+            player.car.nitro_charges = self.settings.car.DEFAULT_NITRO_CHARGES
+            player.car.nitro_active = False
+            player.car.nitro_remaining_ticks = 0
+
+            player.current_checkpoint = 0
+            player.checkpoints_passed = set()
+            player.split_times = []
+            player.is_finished = False
+            player.finish_time = None
+            player.is_off_track = False
+            player.position = None
+            player.points = 0
+            player.dnf = False
+            player.missed_checkpoint_tick = None
 
     async def start_loop(self) -> None:
         """Start the game loop in the background."""
@@ -831,34 +877,42 @@ class GameEngine:
                     p1.car.position = p1.car.position - (normal * p1_push)
                     p2.car.position = p2.car.position + (normal * p2_push)
 
-    def _check_checkpoint_progress(self, player: PlayerState) -> None:
-        """
-        Check if player has passed the next checkpoint.
-
-        Args:
-            player: Player to check
-        """
-        if player.current_checkpoint >= len(self.state.track.checkpoints):
-            return
-
-        checkpoint = self.state.track.checkpoints[player.current_checkpoint]
-        cp_x, cp_y = checkpoint.position
-
-        # Create checkpoint line perpendicular to its angle
-        # The checkpoint angle points along the track direction
-        # We want a line perpendicular to this
+    def _crossed_checkpoint_forward(
+        self, checkpoint, prev_x: float, prev_y: float, curr_x: float, curr_y: float
+    ) -> bool:
+        """True iff the segment prev->curr crosses the checkpoint line moving forward."""
         import math
+        cp_x, cp_y = checkpoint.position
         perp_angle = checkpoint.angle + math.pi / 2
-
-        # Calculate checkpoint line endpoints (perpendicular to track direction)
         half_width = checkpoint.width / 2
         line_p1_x = cp_x + math.cos(perp_angle) * half_width
         line_p1_y = cp_y + math.sin(perp_angle) * half_width
         line_p2_x = cp_x - math.cos(perp_angle) * half_width
         line_p2_y = cp_y - math.sin(perp_angle) * half_width
 
-        # Check if car crossed the checkpoint line
-        # We need the previous position to detect crossing
+        if not self._line_segments_intersect(
+            prev_x, prev_y, curr_x, curr_y,
+            line_p1_x, line_p1_y, line_p2_x, line_p2_y
+        ):
+            return False
+
+        move_dx = curr_x - prev_x
+        move_dy = curr_y - prev_y
+        cp_dir_x = math.cos(checkpoint.angle)
+        cp_dir_y = math.sin(checkpoint.angle)
+        return (move_dx * cp_dir_x + move_dy * cp_dir_y) > 0
+
+    def _check_checkpoint_progress(self, player: PlayerState) -> None:
+        """
+        Check if player has passed the next checkpoint, OR has skipped
+        ahead through a later one (in which case a "missed checkpoint"
+        warning is raised but no credit is given for the later crossing).
+        """
+        checkpoints = self.state.track.checkpoints
+        if player.current_checkpoint >= len(checkpoints):
+            return
+
+        # We need a previous position to detect crossing.
         if not hasattr(player, '_prev_position'):
             player._prev_position = player.car.position
             return
@@ -868,41 +922,37 @@ class GameEngine:
         curr_x = player.car.position.x
         curr_y = player.car.position.y
 
-        # Check if line segments intersect (car path vs checkpoint line)
-        crossed = self._line_segments_intersect(
-            prev_x, prev_y, curr_x, curr_y,
-            line_p1_x, line_p1_y, line_p2_x, line_p2_y
-        )
+        # First, the normal case: did we cross the *next* checkpoint?
+        next_cp = checkpoints[player.current_checkpoint]
+        if self._crossed_checkpoint_forward(next_cp, prev_x, prev_y, curr_x, curr_y):
+            checkpoint_index = player.current_checkpoint
+            player.checkpoints_passed.add(checkpoint_index)
+            player.current_checkpoint += 1
 
-        if crossed:
-            # Check if crossing in the forward direction
-            # Dot product of movement direction with checkpoint direction
-            move_dx = curr_x - prev_x
-            move_dy = curr_y - prev_y
-            cp_dir_x = math.cos(checkpoint.angle)
-            cp_dir_y = math.sin(checkpoint.angle)
+            split_time = 0.0
+            if self.state.race_info.start_time is not None:
+                split_time = time.time() - self.state.race_info.start_time
+                player.split_times.append(split_time)
 
-            dot_product = move_dx * cp_dir_x + move_dy * cp_dir_y
-
-            # Only count if moving forward through checkpoint
-            if dot_product > 0:
-                checkpoint_index = player.current_checkpoint
-                player.checkpoints_passed.add(checkpoint_index)
-                player.current_checkpoint += 1
-
-                # Record split time (elapsed time since race start)
-                split_time = 0.0
-                if self.state.race_info.start_time is not None:
-                    split_time = time.time() - self.state.race_info.start_time
-                    player.split_times.append(split_time)
-
-                # Call bot's on_checkpoint callback if this is a bot
-                if player.is_bot and player.bot_instance is not None:
-                    self.bot_manager.call_on_checkpoint(
-                        bot_instance=player.bot_instance,
-                        checkpoint_index=checkpoint_index,
-                        split_time=split_time
-                    )
+            if player.is_bot and player.bot_instance is not None:
+                self.bot_manager.call_on_checkpoint(
+                    bot_instance=player.bot_instance,
+                    checkpoint_index=checkpoint_index,
+                    split_time=split_time
+                )
+        else:
+            # Skip-detection: did we cross a checkpoint AHEAD of the next?
+            # Check a small lookahead window — beyond ~5 ahead it's very
+            # unlikely a single tick spans that distance.
+            for ahead_idx in range(
+                player.current_checkpoint + 1,
+                min(player.current_checkpoint + 6, len(checkpoints)),
+            ):
+                if self._crossed_checkpoint_forward(
+                    checkpoints[ahead_idx], prev_x, prev_y, curr_x, curr_y
+                ):
+                    player.missed_checkpoint_tick = self.state.tick
+                    break
 
         # Update previous position for next frame
         player._prev_position = Vector2(curr_x, curr_y)
@@ -1116,6 +1166,7 @@ class GameEngine:
             },
             'current_checkpoint': player.current_checkpoint,
             'split_times': player.split_times,
+            'missed_checkpoint_tick': player.missed_checkpoint_tick,
             'is_finished': player.is_finished,
             'finish_time': player.finish_time,
             'is_off_track': player.is_off_track,

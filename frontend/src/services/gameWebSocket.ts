@@ -34,6 +34,9 @@ export interface GameStateMessage {
         };
         current_checkpoint: number;
         split_times: number[];  // Elapsed time at each checkpoint
+        // Tick at which this driver skipped a checkpoint (crossed one
+        // ahead of their current target). Null until it happens.
+        missed_checkpoint_tick: number | null;
         is_finished: boolean;
         finish_time: number | null;
         is_off_track: boolean;
@@ -69,11 +72,17 @@ export interface PingMessage {
   timestamp?: number;
 }
 
-export type ServerMessage = GameStateMessage | ConnectedMessage | PingMessage;
+export interface TrackChangedMessage {
+  type: 'track_changed';
+  data: { track: Track };
+}
+
+export type ServerMessage = GameStateMessage | ConnectedMessage | PingMessage | TrackChangedMessage;
 
 export interface GameWebSocketCallbacks {
   onConnected?: (sessionId: string, playerId: string, track: Track) => void;
   onGameState?: (state: GameStateMessage['data']) => void;
+  onTrackChanged?: (track: Track) => void;
   onDisconnected?: () => void;
   onError?: (error: Event) => void;
 }
@@ -206,6 +215,21 @@ export class GameWebSocketClient {
   }
 
   /**
+   * Ask the server to generate a fresh track for the current session.
+   * Refused server-side while a race is actively running.
+   */
+  regenerateTrack(seed: number): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    this.ws.send(JSON.stringify({
+      type: 'regenerate_track',
+      data: { seed },
+    }));
+  }
+
+  /**
    * Handle incoming message from server.
    */
   private handleMessage(message: ServerMessage): void {
@@ -223,6 +247,10 @@ export class GameWebSocketClient {
 
       case 'game_state':
         this.callbacks.onGameState?.(message.data);
+        break;
+
+      case 'track_changed':
+        this.callbacks.onTrackChanged?.(message.data.track);
         break;
 
       case 'ping':

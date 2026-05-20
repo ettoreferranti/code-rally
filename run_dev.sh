@@ -39,6 +39,13 @@ cleanup() {
 # Set up trap for Ctrl+C
 trap cleanup SIGINT SIGTERM
 
+# Detect the LAN IP of the interface used for the default route (en0, en1, ...)
+DEFAULT_IFACE=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
+LAN_IP=""
+if [ -n "$DEFAULT_IFACE" ]; then
+    LAN_IP=$(ipconfig getifaddr "$DEFAULT_IFACE" 2>/dev/null || true)
+fi
+
 # ==================== BACKEND SETUP ====================
 echo -e "${BLUE}[Backend]${NC} Setting up backend server..."
 
@@ -84,6 +91,12 @@ echo -e "${GREEN}================================${NC}"
 echo -e "${BLUE}Backend:${NC}  http://localhost:8000"
 echo -e "${BLUE}API Docs:${NC} http://localhost:8000/docs"
 echo -e "${BLUE}Frontend:${NC} http://localhost:5173"
+if [ -n "$LAN_IP" ]; then
+    echo ""
+    echo -e "${YELLOW}LAN (share with other players on this Wi-Fi):${NC}"
+    echo -e "  Backend:  http://${LAN_IP}:8000"
+    echo -e "  Frontend: http://${LAN_IP}:5173"
+fi
 echo ""
 echo -e "${YELLOW}Press Ctrl+C to stop both servers${NC}"
 echo ""

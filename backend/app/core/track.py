@@ -148,18 +148,45 @@ class TrackGenerator:
         if seed is not None:
             random.seed(seed)
 
-    def generate(self, difficulty: str = "medium") -> Track:
+    # Length preset → multiplier applied to the configured Y-span,
+    # scaled symmetrically around the span midpoint. num_points is
+    # scaled by the same factor so corner density stays constant.
+    LENGTH_FACTORS = {
+        "short": 0.5,
+        "medium": 1.0,
+        "long": 1.5,
+    }
+
+    # Curves preset → (serpentine_frequency, serpentine_amplitude).
+    # "mixed" uses the values from config; the others override.
+    CURVES_PRESETS = {
+        "flowing": (3.0, 280.0),
+        "mixed": None,   # use config defaults
+        "twisty": (9.0, 420.0),
+    }
+
+    def generate(
+        self,
+        difficulty: str = "medium",
+        length: str = "medium",
+        curves: str = "mixed",
+    ) -> Track:
         """
         Generate a complete point-to-point rally stage.
 
         Args:
-            difficulty: Track difficulty ("easy", "medium", "hard")
+            difficulty: Track difficulty ("easy", "medium", "hard").
+                Controls num_control_points (corner density).
+            length: "short" | "medium" | "long". Multiplies the spatial
+                Y-span and number of control points.
+            curves: "flowing" | "mixed" | "twisty". Controls the
+                serpentine amplitude and frequency.
 
         Returns:
             Generated Track object
         """
         # Generate control points for track shape
-        control_points = self._generate_control_points(difficulty)
+        control_points = self._generate_control_points(difficulty, length, curves)
 
         # Create smooth segments between control points
         segments, curve_intensities = self._create_segments(control_points, difficulty)
@@ -195,31 +222,47 @@ class TrackGenerator:
             obstacles=obstacles
         )
 
-    def _generate_control_points(self, difficulty: str) -> List[TrackPoint]:
+    def _generate_control_points(
+        self,
+        difficulty: str,
+        length: str = "medium",
+        curves: str = "mixed",
+    ) -> List[TrackPoint]:
         """
         Generate control points for a point-to-point rally stage.
-
-        Args:
-            difficulty: Track difficulty level
-
-        Returns:
-            List of control points forming a winding path from start to finish
         """
-        # Number of control points based on difficulty
-        num_points = {
-            "easy": 8,
-            "medium": 13,  # Match frontend: 13 points = 12 segments
-            "hard": 18
-        }.get(difficulty, 13)
+        # Number of control points by difficulty (from config). Scaled
+        # with stage length so segment density stays roughly constant.
+        base_num_points = {
+            "easy": self.config.STAGE_NUM_POINTS_EASY,
+            "medium": self.config.STAGE_NUM_POINTS_MEDIUM,
+            "hard": self.config.STAGE_NUM_POINTS_HARD,
+        }.get(difficulty, self.config.STAGE_NUM_POINTS_MEDIUM)
 
-        # Generate points in a winding path from top-left to bottom-right
+        length_factor = self.LENGTH_FACTORS.get(length, 1.0)
+        num_points = max(4, int(round(base_num_points * length_factor)))
+
+        # Resolve curves preset → (frequency, amplitude).
+        curve_override = self.CURVES_PRESETS.get(curves)
+        if curve_override is None:
+            serpentine_frequency = self.config.STAGE_SERPENTINE_FREQUENCY
+            serpentine_amplitude = self.config.STAGE_SERPENTINE_AMPLITUDE
+        else:
+            serpentine_frequency, serpentine_amplitude = curve_override
+
+        # Generate points in a winding path from start to end.
         points = []
 
-        # Define start and end positions
-        start_x = -600.0
-        start_y = -500.0
-        end_x = -400.0
-        end_y = 700.0
+        # Scale the Y-span around its midpoint by length_factor so
+        # short/medium/long stretch/shrink symmetrically.
+        base_start_y = self.config.STAGE_START_Y
+        base_end_y = self.config.STAGE_END_Y
+        mid_y = (base_start_y + base_end_y) / 2
+        half_span = (base_start_y - base_end_y) / 2  # signed: positive when start>end
+        start_x = self.config.STAGE_START_X
+        end_x = self.config.STAGE_END_X
+        start_y = mid_y + half_span * length_factor
+        end_y = mid_y - half_span * length_factor
 
         # Calculate spacing
         total_distance_x = end_x - start_x
@@ -233,10 +276,11 @@ class TrackGenerator:
             base_x = start_x + progress * total_distance_x
             base_y = start_y + progress * total_distance_y
 
-            # Add serpentine variation (side-to-side movement)
-            # Stronger variation in the middle, less at start/end
-            variation_strength = math.sin(progress * math.pi) * 300.0
-            serpentine_offset = math.sin(progress * math.pi * 3) * variation_strength
+            # Add serpentine variation (side-to-side movement).
+            # Amplitude is strongest in the middle, tapered to 0 at ends.
+            # Frequency multiplier scales corners-per-distance.
+            variation_strength = math.sin(progress * math.pi) * serpentine_amplitude
+            serpentine_offset = math.sin(progress * math.pi * serpentine_frequency) * variation_strength
 
             x = base_x + serpentine_offset
             y = base_y + random.uniform(-50, 50)  # Small random variation

@@ -11,6 +11,11 @@ export default function MultiplayerRace() {
   // value itself is read via `trackRef.current` everywhere downstream.
   const [_track, setTrack] = useState<Track | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
+  // Set to the server tick at which the local player skipped a
+  // checkpoint, then auto-cleared after a few seconds so the warning
+  // banner flashes briefly.
+  const [missedCheckpointBanner, setMissedCheckpointBanner] = useState<number | null>(null);
+  const lastMissedTickRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -39,6 +44,11 @@ export default function MultiplayerRace() {
   const isSpectator = useMemo(() => {
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get('spectate') === 'true';
+  }, []);
+
+  const lobbyIdFromUrl = useMemo(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('lobby_id') || null;
   }, []);
 
   // Spectator camera state
@@ -79,6 +89,13 @@ export default function MultiplayerRace() {
 
         setLoading(false);
         setError(null);  // Clear any previous errors
+      },
+
+      onTrackChanged: (newTrack) => {
+        // Server rerolled the track for this session. Swap it in for
+        // both the React tree (renderer) and the ref used by onGameState.
+        setTrack(newTrack);
+        trackRef.current = newTrack;
       },
 
       onGameState: (state: GameStateMessage['data']) => {
@@ -139,6 +156,16 @@ export default function MultiplayerRace() {
         };
 
         setGameState(newGameState);
+
+        // Trigger the "missed checkpoint" banner when the local player
+        // skips one (server signals via a new tick value).
+        if (
+          playerData?.missed_checkpoint_tick != null &&
+          playerData.missed_checkpoint_tick !== lastMissedTickRef.current
+        ) {
+          lastMissedTickRef.current = playerData.missed_checkpoint_tick;
+          setMissedCheckpointBanner(playerData.missed_checkpoint_tick);
+        }
 
         // Check if race has finished and collect results
         if (state.race_info.status === 'finished' && !hasShownResultsRef.current && !hasClosedResultsRef.current) {
@@ -212,6 +239,13 @@ export default function MultiplayerRace() {
     }
   }, [inputState, gameState?.raceInfo.raceStatus]);
 
+  // Auto-clear the missed-checkpoint banner ~3s after it appears.
+  useEffect(() => {
+    if (missedCheckpointBanner === null) return;
+    const timer = setTimeout(() => setMissedCheckpointBanner(null), 3000);
+    return () => clearTimeout(timer);
+  }, [missedCheckpointBanner]);
+
   const handleStartRace = () => {
     console.log('Start Race clicked');
     if (wsRef.current && wsRef.current.isConnected()) {
@@ -220,6 +254,8 @@ export default function MultiplayerRace() {
       hasClosedResultsRef.current = false;
       wsRef.current.startRace();
       setRaceStarted(true);
+      lastMissedTickRef.current = null;
+      setMissedCheckpointBanner(null);
     } else {
       console.log('WebSocket not connected!');
     }
@@ -233,20 +269,20 @@ export default function MultiplayerRace() {
     hasClosedResultsRef.current = true;  // Prevent results from reopening until race restarts
   };
 
-  const handleShareSession = () => {
-    if (!sessionId) return;
+  const handleShareLobby = () => {
+    if (!lobbyIdFromUrl) return;
 
     const url = new URL(window.location.href);
-    url.searchParams.set('session_id', sessionId);
-    url.searchParams.set('seed', seed.toString());
+    url.pathname = `/lobby/${lobbyIdFromUrl}`;
+    url.search = '';
 
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
     navigator.clipboard.writeText(url.toString()).then(() => {
       if (isLocalhost) {
-        alert(`⚠️ Link copied! Note: You're using localhost.\n\nFor network access, replace 'localhost' with your IP address (e.g., 172.16.1.133) in the link:\n\n${url.toString()}`);
+        alert(`⚠️ Link copied! Note: You're using localhost.\n\nFor network access, replace 'localhost' with your machine's LAN IP in the link:\n\n${url.toString()}`);
       } else {
-        alert('✅ Session link copied to clipboard! Share it with others to race together.');
+        alert('✅ Lobby link copied to clipboard! Share it with others so they can join.');
       }
     }).catch(() => {
       alert(`Share this link: ${url.toString()}`);
@@ -329,13 +365,15 @@ export default function MultiplayerRace() {
                 Copy
               </button>
             </div>
-            <button
-              onClick={handleShareSession}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              title="Copy shareable session link to clipboard"
-            >
-              Share Session
-            </button>
+            {lobbyIdFromUrl && (
+              <button
+                onClick={handleShareLobby}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                title="Copy lobby join link to clipboard"
+              >
+                Share Lobby
+              </button>
+            )}
             {!raceStarted && (
               <button
                 onClick={handleStartRace}
@@ -347,9 +385,13 @@ export default function MultiplayerRace() {
             {/* Mid-race bot submission was removed in the Tinker / lobby
                 cleanup — all bots are added pre-race in the lobby. */}
             <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              title="Generate new random track"
+              onClick={() => {
+                const newSeed = Math.floor(Math.random() * 1000000);
+                wsRef.current?.regenerateTrack(newSeed);
+              }}
+              disabled={raceStarted}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+              title={raceStarted ? 'Finish the race to change track' : 'Generate new random track'}
             >
               New Track
             </button>
@@ -421,7 +463,7 @@ export default function MultiplayerRace() {
 
       {!isSpectator && (
         <p className="text-gray-300 mb-4">
-          Physics running on server at 60Hz. Click "Share Session" to race with friends in real-time!
+          Physics running on server at 60Hz. Click "Share Lobby" to invite friends to this race.
         </p>
       )}
 
@@ -435,6 +477,14 @@ export default function MultiplayerRace() {
           cameraMode={cameraMode}
         />
         {gameState && <RaceHUD raceInfo={gameState.raceInfo} car={gameState.cars[0]} />}
+        {missedCheckpointBanner !== null && !isSpectator && (
+          <div
+            role="alert"
+            className="absolute top-2 left-1/2 -translate-x-1/2 px-6 py-2 bg-red-600 text-white font-bold rounded shadow-lg pointer-events-none animate-pulse"
+          >
+            ⚠ MISSED CHECKPOINT — go back!
+          </div>
+        )}
         {gameState && (
           <CountdownOverlay
             countdown={gameState.raceInfo.countdownRemaining}

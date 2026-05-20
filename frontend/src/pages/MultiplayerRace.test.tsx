@@ -125,7 +125,7 @@ describe('MultiplayerRace - Spectator Mode', () => {
 
     expect(screen.queryByText(/Keyboard Controls/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Start Race/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Share Session/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Share Lobby/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /New Track/i })).not.toBeInTheDocument();
   });
 

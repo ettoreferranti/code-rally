@@ -35,6 +35,19 @@ class GameConfig:
     CHECKPOINT_SPACING: int = 200  # Approximate distance between checkpoints
     FINISH_GRACE_PERIOD: int = 30  # Seconds after first finisher before DNF
 
+    # Stage shape — start/end define the spatial extent (in y-down world
+    # coords), num_control_points sets corner density per difficulty,
+    # serpentine_* control how curvy the path is.
+    STAGE_START_X: float = -600.0
+    STAGE_START_Y: float = 1900.0     # car starts at high Y (bottom of screen)
+    STAGE_END_X: float = -400.0
+    STAGE_END_Y: float = -1100.0      # finish at low Y (top of screen) -> car drives "up"
+    STAGE_NUM_POINTS_EASY: int = 16
+    STAGE_NUM_POINTS_MEDIUM: int = 26
+    STAGE_NUM_POINTS_HARD: int = 36
+    STAGE_SERPENTINE_AMPLITUDE: float = 350.0   # peak side-to-side swing (units)
+    STAGE_SERPENTINE_FREQUENCY: float = 6.0     # number of oscillation half-cycles across the stage
+
     # Containment boundaries (outer walls that cars collide with)
     CONTAINMENT_OFFSET: float = 350.0  # Constant distance from track edge to wall (in units)
     CONTAINMENT_DISTANCE: float = 1.0  # Fixed distance from track edge (multiplier of track width) - for testing

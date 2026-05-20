@@ -429,9 +429,13 @@ class LobbyManager:
             logger.warning(f"Cannot start race for lobby {lobby_id} (status={lobby.status}, members={lobby.get_member_count()})")
             return None
 
-        # Generate track
+        # Generate track using the lobby's shape settings.
         generator = TrackGenerator(seed=lobby.settings.track_seed)
-        track = generator.generate(difficulty=lobby.settings.track_difficulty)
+        track = generator.generate(
+            difficulty=lobby.settings.track_difficulty,
+            length=lobby.settings.track_length,
+            curves=lobby.settings.track_curves,
+        )
         lobby.track = track
 
         # Create game session ID

@@ -6,6 +6,19 @@ import type { Track, TrackSegment, CarState } from './types';
 import { SurfaceType } from './types';
 
 /**
+ * Darken or lighten a hex color. `amount` in [-1, 1] — negative darkens.
+ */
+function shade(hex: string, amount: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  const adj = (c: number) =>
+    Math.max(0, Math.min(255, Math.round(amount < 0 ? c * (1 + amount) : c + (255 - c) * amount)));
+  return `rgb(${adj(r)}, ${adj(g)}, ${adj(b)})`;
+}
+
+/**
  * Surface colors for different track types.
  */
 const SURFACE_COLORS: Record<SurfaceType, string> = {
@@ -313,27 +326,54 @@ export function renderCar(
   ctx.translate(car.position.x, car.position.y);
   ctx.rotate(car.heading);
 
-  // Car dimensions (width is along direction of travel = +x in local coords)
+  // Car dimensions: 30 long (along +x = forward), 20 wide (along ±y = sides).
   const width = 30;
   const height = 20;
 
-  // Draw car body (rectangle along x-axis)
-  ctx.fillStyle = carColor;
-  ctx.fillRect(-width / 2, -height / 2, width, height);
-
-  // Draw car outline
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(-width / 2, -height / 2, width, height);
-
-  // Draw heading indicator (triangle pointing in +x direction)
-  ctx.fillStyle = '#ffffff';
+  // Drop shadow under the car (slightly offset toward +y in local frame).
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.beginPath();
-  ctx.moveTo(width / 2 + 5, 0);
-  ctx.lineTo(width / 2 - 3, -height / 4);
-  ctx.lineTo(width / 2 - 3, height / 4);
-  ctx.closePath();
+  ctx.ellipse(1, 2, width / 2 + 2, height / 2 + 1, 0, 0, Math.PI * 2);
   ctx.fill();
+
+  // Wheels (drawn before body so they peek out at the sides).
+  ctx.fillStyle = '#1a1a1a';
+  const wheelLen = 6;
+  const wheelW = 3;
+  const wheelOffsets: Array<[number, number]> = [
+    [width / 2 - 5, -height / 2 - 1],  // front-left
+    [width / 2 - 5, height / 2 - wheelW + 1],  // front-right
+    [-width / 2 + 3, -height / 2 - 1],  // rear-left
+    [-width / 2 + 3, height / 2 - wheelW + 1],  // rear-right
+  ];
+  for (const [wx, wy] of wheelOffsets) {
+    ctx.fillRect(wx, wy, wheelLen, wheelW);
+  }
+
+  // Body — rounded rectangle in the player color.
+  ctx.fillStyle = carColor;
+  ctx.beginPath();
+  ctx.roundRect(-width / 2, -height / 2, width, height, 4);
+  ctx.fill();
+  ctx.strokeStyle = shade(carColor, -0.5);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Windshield — darker rounded rect near the front of the body.
+  ctx.fillStyle = 'rgba(20, 30, 50, 0.85)';
+  ctx.beginPath();
+  ctx.roundRect(width / 4 - 3, -height / 2 + 3, 9, height - 6, 2);
+  ctx.fill();
+
+  // Headlights at the front corners.
+  ctx.fillStyle = '#fffacd';
+  ctx.fillRect(width / 2 - 2, -height / 2 + 2, 2, 2);
+  ctx.fillRect(width / 2 - 2, height / 2 - 4, 2, 2);
+
+  // Taillights at the rear corners.
+  ctx.fillStyle = '#ff3030';
+  ctx.fillRect(-width / 2, -height / 2 + 2, 2, 2);
+  ctx.fillRect(-width / 2, height / 2 - 4, 2, 2);
 
   // Draw drift indicator if drifting
   if (car.is_drifting) {

@@ -142,6 +142,53 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+def _serialize_track(track) -> dict:
+    """Serialize a Track into the JSON shape clients expect."""
+    return {
+        'segments': [
+            {
+                'start': {
+                    'x': seg.start.x,
+                    'y': seg.start.y,
+                    'width': seg.start.width,
+                    'surface': seg.start.surface.value if hasattr(seg.start.surface, 'value') else seg.start.surface
+                },
+                'end': {
+                    'x': seg.end.x,
+                    'y': seg.end.y,
+                    'width': seg.end.width,
+                    'surface': seg.end.surface.value if hasattr(seg.end.surface, 'value') else seg.end.surface
+                },
+                'control1': list(seg.control1) if seg.control1 else None,
+                'control2': list(seg.control2) if seg.control2 else None,
+            }
+            for seg in track.segments
+        ],
+        'checkpoints': [
+            {
+                'position': list(cp.position),
+                'angle': cp.angle,
+                'width': cp.width
+            }
+            for cp in track.checkpoints
+        ],
+        'start_position': list(track.start_position),
+        'start_heading': track.start_heading,
+        'obstacles': [
+            {
+                'position': list(obs.position),
+                'radius': obs.radius,
+                'type': obs.type
+            }
+            for obs in (track.obstacles or [])
+        ],
+        'containment': {
+            'left_points': [list(p) for p in track.containment.left_points],
+            'right_points': [list(p) for p in track.containment.right_points]
+        } if track.containment else None
+    }
+
+
 def get_or_create_session(session_id: Optional[str] = None, difficulty: str = "medium", seed: Optional[int] = None) -> Tuple[str, GameEngine]:
     """
     Get an existing game session or create a new one.
@@ -341,6 +388,8 @@ def serialize_lobby_state(lobby) -> dict:
         'status': lobby.status.value,
         'settings': {
             'track_difficulty': lobby.settings.track_difficulty,
+            'track_length': lobby.settings.track_length,
+            'track_curves': lobby.settings.track_curves,
             'track_seed': lobby.settings.track_seed,
             'max_players': lobby.settings.max_players,
             'finish_grace_period': lobby.settings.finish_grace_period
@@ -1021,6 +1070,55 @@ async def game_websocket(
                 # Start race countdown (direct mode only)
                 if engine:
                     engine.start_race()
+
+            elif message['type'] == 'regenerate_track':
+                # Reroll the track for the current session/lobby. Refused
+                # while the race is actively running; everyone connected
+                # receives the new track and is reset to the new start line.
+                target_engine = engine
+                if target_engine is None and is_lobby_mode:
+                    lobby = get_lobby_manager().get_lobby(lobby_id)
+                    if lobby and lobby.game_session_id in _game_sessions:
+                        target_engine = _game_sessions[lobby.game_session_id]
+
+                if target_engine is None:
+                    await websocket.send_json({
+                        'type': 'error',
+                        'data': {'message': 'No active race session to regenerate'}
+                    })
+                elif target_engine.state.race_info.status == RaceStatus.RACING:
+                    await websocket.send_json({
+                        'type': 'error',
+                        'data': {'message': 'Cannot change track while race is running'}
+                    })
+                else:
+                    raw_seed = (message.get('data') or {}).get('seed')
+                    try:
+                        new_seed = int(raw_seed) if raw_seed is not None else None
+                    except (TypeError, ValueError):
+                        new_seed = None
+
+                    # Honor lobby track-shape settings if this engine
+                    # belongs to a lobby; otherwise fall back to defaults.
+                    gen_kwargs = {'difficulty': 'medium', 'length': 'medium', 'curves': 'mixed'}
+                    if is_lobby_mode:
+                        lobby = get_lobby_manager().get_lobby(lobby_id)
+                        if lobby:
+                            gen_kwargs['difficulty'] = lobby.settings.track_difficulty
+                            gen_kwargs['length'] = lobby.settings.track_length
+                            gen_kwargs['curves'] = lobby.settings.track_curves
+
+                    new_track = TrackGenerator(seed=new_seed).generate(**gen_kwargs)
+                    target_engine.reset_to_new_track(new_track)
+
+                    payload = {
+                        'type': 'track_changed',
+                        'data': {'track': _serialize_track(new_track)}
+                    }
+                    if is_lobby_mode:
+                        await broadcast_to_lobby(lobby_id, payload)
+                    else:
+                        await manager.broadcast(payload, session_id)
 
             # Mid-race `submit_bot` was removed in the Tinker / unified
             # lobby cleanup. All bots are now added pre-race via
