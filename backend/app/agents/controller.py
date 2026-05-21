@@ -57,6 +57,23 @@ _DIAGNOSTIC_LOG_EVERY = 10
 _MAX_TARGET_SPEED_KMH = 400.0
 _MAX_OFFSET_M = 20.0
 
+# Distance (engine units, ≈ metres) at which the lookahead starts
+# blending from cp[next] toward cp[next+1]. When the car is further than
+# this from cp[next], the lookahead sits exactly on cp[next] (legacy
+# single-checkpoint behaviour). Inside the radius, the lookahead smoothly
+# slides forward, which is what gives the controller racing-line geometry
+# (the steering target anticipates the corner exit, not just the apex
+# marker).
+_LOOKAHEAD_BLEND_RADIUS_M = 60.0
+
+# Lateral offset magnitudes applied when a tactic is active. These
+# override the LLM-supplied ``racing_line_offset_m`` so the tactic enum
+# is actually load-bearing. Tuned to be close to (but not at) the
+# Intent schema ceiling (±20 m) — the racing line lives within the
+# track, and 8 m / 6 m is comfortably inside most stage widths.
+_TACTIC_ATTACK_OFFSET_M = 8.0  # overtake / pit
+_TACTIC_BLOCK_OFFSET_M = 6.0  # defensive inside line
+
 
 @dataclass(frozen=True)
 class ControlInputs:
@@ -109,18 +126,26 @@ class Controller:
                 target_speed_kmh=self._fallback_speed_kmh,
                 racing_line_offset_m=0.0,
                 aggression=0.0,
+                use_nitro=False,
                 state=state,
             )
             self._maybe_log(state, self._fallback_speed_kmh, 0.0, 0.0, inputs, fallback=True)
             return inputs
 
         target = _clamp(effective.target_speed_kmh, 0.0, _MAX_TARGET_SPEED_KMH)
-        offset = _clamp(effective.racing_line_offset_m, -_MAX_OFFSET_M, _MAX_OFFSET_M)
         aggression = _clamp(effective.aggression, 0.0, 1.0)
+        offset = _resolve_offset(effective, state)
+        offset = _clamp(offset, -_MAX_OFFSET_M, _MAX_OFFSET_M)
+        # Nitro is gated on having charges available; the engine respects
+        # this too but we surface the gate here so the controller's per-tick
+        # output reflects reality (the LLM's intent.use_nitro can be True
+        # for many ticks while charges trickle down to zero).
+        use_nitro = bool(effective.use_nitro) and state.car.nitro_charges > 0
         inputs = self._compute_from_target(
             target_speed_kmh=target,
             racing_line_offset_m=offset,
             aggression=aggression,
+            use_nitro=use_nitro,
             state=state,
         )
         self._maybe_log(state, target, offset, aggression, inputs, fallback=False)
@@ -175,6 +200,7 @@ class Controller:
         target_speed_kmh: float,
         racing_line_offset_m: float,
         aggression: float,
+        use_nitro: bool,
         state: BotGameState,
     ) -> ControlInputs:
         steer = self._compute_steering(racing_line_offset_m, aggression, state)
@@ -184,6 +210,7 @@ class Controller:
             brake=brake,
             turn_left=steer == "left",
             turn_right=steer == "right",
+            nitro=use_nitro,
         )
 
     def _compute_steering(
@@ -257,25 +284,57 @@ class Controller:
         racing_line_offset_m: float,
         state: BotGameState,
     ) -> Optional[tuple]:
-        """Lookahead = next checkpoint + perpendicular offset.
+        """Two-checkpoint blended lookahead with perpendicular offset.
 
-        Returns None when no checkpoint is available (e.g. all passed),
-        which the caller treats as "go straight".
+        When the car is more than ``_LOOKAHEAD_BLEND_RADIUS_M`` from
+        ``cp[next]``, the lookahead sits on ``cp[next]`` (legacy single-
+        checkpoint behaviour). Inside the blend radius, the lookahead
+        slides forward toward ``cp[next+1]`` — which is what gives the
+        controller the geometric anticipation needed to actually drive a
+        racing line through a corner, instead of always aiming at the
+        next checkpoint marker.
+
+        The perpendicular offset is applied along the local racing-line
+        direction (``cp[next] → cp[next+1]`` when available), so a
+        constant ``racing_line_offset_m`` is interpreted in the frame of
+        the road through the corner, not the frame of the car's current
+        approach vector.
+
+        Returns ``None`` when no checkpoint is available.
         """
         checkpoints = state.track.checkpoints
         idx = state.track.next_checkpoint
         if idx < 0 or idx >= len(checkpoints):
             return None
 
-        cx, cy = checkpoints[idx]
         car_x, car_y = state.car.position
+        cp_next = checkpoints[idx]
 
-        # Track direction unit vector at the car (approximated as car → checkpoint).
-        dx = cx - car_x
-        dy = cy - car_y
+        has_next_next = idx + 1 < len(checkpoints)
+        if has_next_next:
+            cp_after = checkpoints[idx + 1]
+            d_to_next = math.hypot(cp_next[0] - car_x, cp_next[1] - car_y)
+            # weight=0 when far (use cp[next]); weight=1 when arriving at
+            # cp[next] (use cp[next+1]).
+            weight = max(0.0, min(1.0, 1.0 - d_to_next / _LOOKAHEAD_BLEND_RADIUS_M))
+            target_x = (1.0 - weight) * cp_next[0] + weight * cp_after[0]
+            target_y = (1.0 - weight) * cp_next[1] + weight * cp_after[1]
+            # Local racing-line direction = direction of travel through the
+            # corner. Falls back to car→cp[next] if the two checkpoints
+            # coincide (degenerate).
+            dx = cp_after[0] - cp_next[0]
+            dy = cp_after[1] - cp_next[1]
+            if dx == 0.0 and dy == 0.0:
+                dx = cp_next[0] - car_x
+                dy = cp_next[1] - car_y
+        else:
+            target_x, target_y = cp_next
+            dx = cp_next[0] - car_x
+            dy = cp_next[1] - car_y
+
         norm = math.hypot(dx, dy)
         if norm == 0.0:
-            return cx, cy
+            return target_x, target_y
         ux, uy = dx / norm, dy / norm
 
         # Right perpendicular in y-DOWN coords (#164): rotating a track-
@@ -284,7 +343,7 @@ class Controller:
         #     rot_+90(ux, uy) = (-uy, ux)
         # Positive offset shifts the lookahead to the right of track direction.
         px, py = -uy, ux
-        return (cx + racing_line_offset_m * px, cy + racing_line_offset_m * py)
+        return (target_x + racing_line_offset_m * px, target_y + racing_line_offset_m * py)
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -300,3 +359,66 @@ def _wrap_signed_deg(deg: float) -> float:
     if wrapped == -180.0:
         return 180.0
     return wrapped
+
+
+def _resolve_offset(intent: Intent, state: BotGameState) -> float:
+    """Convert ``intent.tactic`` + ``target_opponent_index`` to an effective
+    lateral offset, falling back to the LLM-supplied
+    ``racing_line_offset_m`` when no tactical override applies.
+
+    Resolution order:
+
+    1. ``tactic="overtake"`` with a visible target ⇒ shift to the open
+       side of that opponent (sign opposite the opponent's relative
+       bearing).
+    2. ``tactic="pit"`` with a visible target ⇒ shift toward the
+       opponent (sign matches the opponent's relative bearing).
+    3. ``tactic="block"`` with a known upcoming turn ⇒ shift to the
+       inside of the turn (positive offset for a right turn,
+       negative for a left turn).
+    4. Otherwise ⇒ use ``intent.racing_line_offset_m`` verbatim.
+
+    "Visible target" means the opponent at the indexed slot exists in
+    the nearest-2 sorted list (matching what the observation showed the
+    LLM). If the slot is empty (e.g. the LLM hallucinates a target in a
+    solo race), the offset falls through to the LLM value rather than
+    overriding it.
+    """
+    tactic = intent.tactic
+    if tactic in ("overtake", "pit") and intent.target_opponent_index is not None:
+        target = _opponent_at_slot(state, intent.target_opponent_index)
+        if target is not None:
+            # In y-down, positive bearing = opponent on the driver's right.
+            # Overtake = go to the OPPOSITE side (negative offset = left of
+            # track direction). Pit = aim AT the opponent.
+            sign = 1.0 if target.relative_angle >= 0 else -1.0
+            if tactic == "overtake":
+                return -sign * _TACTIC_ATTACK_OFFSET_M
+            return sign * _TACTIC_ATTACK_OFFSET_M  # pit
+    if tactic == "block":
+        upcoming = state.track.upcoming_turn
+        if upcoming == "right":
+            # Inside of a right turn is on the driver's right ⇒ +y in
+            # y-down ⇒ positive offset.
+            return _TACTIC_BLOCK_OFFSET_M
+        if upcoming == "left":
+            return -_TACTIC_BLOCK_OFFSET_M
+        # "straight" or unknown — block has no inside line to claim.
+
+    return float(intent.racing_line_offset_m)
+
+
+def _opponent_at_slot(state: BotGameState, slot_index: int):
+    """Return the opponent at the given observation slot, or ``None``.
+
+    The observation sorts opponents by distance and exposes the two
+    nearest as slots 0 and 1. The controller uses the same ordering so
+    the LLM's ``target_opponent_index`` references the same car the
+    observation showed it.
+    """
+    if not state.opponents:
+        return None
+    nearest = sorted(state.opponents, key=lambda o: o.distance)[:2]
+    if 0 <= slot_index < len(nearest):
+        return nearest[slot_index]
+    return None

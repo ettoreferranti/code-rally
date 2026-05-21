@@ -58,6 +58,61 @@ class TestIntentSchema:
         with pytest.raises(Exception):
             Intent(target_speed_kmh=80, racing_line_offset_m=999, aggression=0.5)
 
+    def test_legacy_three_field_json_parses_with_defaults(self):
+        # Backward compat: old user-saved prompts emit only the original
+        # three fields. They MUST still parse, with the new fields taking
+        # their defaults (no nitro, no targeting, tactic="race").
+        intent = Intent(target_speed_kmh=80, racing_line_offset_m=0, aggression=0.5)
+        assert intent.use_nitro is False
+        assert intent.target_opponent_index is None
+        assert intent.tactic == "race"
+
+    def test_accepts_use_nitro(self):
+        intent = Intent(
+            target_speed_kmh=160,
+            racing_line_offset_m=0,
+            aggression=0.8,
+            use_nitro=True,
+        )
+        assert intent.use_nitro is True
+
+    def test_accepts_target_opponent_and_tactic(self):
+        intent = Intent(
+            target_speed_kmh=130,
+            racing_line_offset_m=-2,
+            aggression=0.8,
+            target_opponent_index=0,
+            tactic="overtake",
+        )
+        assert intent.target_opponent_index == 0
+        assert intent.tactic == "overtake"
+
+    def test_rejects_invalid_tactic(self):
+        with pytest.raises(Exception):
+            Intent(
+                target_speed_kmh=80,
+                racing_line_offset_m=0,
+                aggression=0.5,
+                tactic="rampage",  # not in the Literal set
+            )
+
+    def test_rejects_out_of_range_target_opponent(self):
+        # Observation exposes 2 slots (0 and 1). Anything else is rejected.
+        with pytest.raises(Exception):
+            Intent(
+                target_speed_kmh=80,
+                racing_line_offset_m=0,
+                aggression=0.5,
+                target_opponent_index=2,
+            )
+        with pytest.raises(Exception):
+            Intent(
+                target_speed_kmh=80,
+                racing_line_offset_m=0,
+                aggression=0.5,
+                target_opponent_index=-1,
+            )
+
 
 # ===== Pure parser =====
 
@@ -193,6 +248,28 @@ class TestBuildPrompt:
         # Sanity-check the prompt steers the model toward JSON
         assert "JSON" in prompt
         assert "target_speed_kmh" in prompt
+
+    def test_protocol_documents_optional_intent_fields(self):
+        # New tactical fields must be documented in the protocol so the
+        # model can actually emit them. The defaults make these optional.
+        prompt = build_prompt("anything")
+        assert "use_nitro" in prompt
+        assert "target_opponent_index" in prompt
+        assert "tactic" in prompt
+        # The tactic enum values must all be visible to the model.
+        for tactic in ("race", "overtake", "block", "pit"):
+            assert tactic in prompt
+
+    def test_default_strategy_mentions_racing_pedagogy(self):
+        # The new default strategy teaches braking/apex/exit and surface
+        # adjustments. Loose checks so wording can evolve.
+        from app.agents.llm_strategist import DEFAULT_STRATEGY_PROMPT
+
+        lower = DEFAULT_STRATEGY_PROMPT.lower()
+        assert "brake" in lower
+        assert "apex" in lower
+        assert "surface" in lower or "gravel" in lower
+        assert "nitro" in lower
 
 
 # ===== LLMStrategist.tick_once =====

@@ -513,14 +513,14 @@ strategy. You don't write code for these — you configure two things:
   (persona, risk appetite, surface heuristics).
 
 You only write the strategy. The JSON I/O contract that the
-controller needs to parse (`target_speed_kmh`, `racing_line_offset_m`,
-`aggression`, "output JSON only, no prose/markdown/code fences") is
-held in an invariant `PROTOCOL_PROMPT` that the server always appends
-on top of your strategy — so a typo in your prompt can't accidentally
-break the bot's I/O contract. See `backend/app/agents/llm_strategist.py::build_prompt`.
+controller needs to parse (Intent fields below) is held in an
+invariant `PROTOCOL_PROMPT` that the server always appends on top of
+your strategy — so a typo in your prompt can't accidentally break the
+bot's I/O contract. See `backend/app/agents/llm_strategist.py::build_prompt`.
 
 A new LLM bot in Tinker pre-fills the strategy with the default
-racing persona so you can tweak rather than start from scratch.
+racing persona (braking/apex/exit, surface adjustments, nitro and
+tactical guidance) so you can tweak rather than start from scratch.
 
 Architecturally the LLM bot uses a two-tier setup:
 
@@ -528,15 +528,36 @@ Architecturally the LLM bot uses a two-tier setup:
 LLM Strategist (~1Hz async)            Deterministic Controller (20Hz sync)
     obs (text) → Intent JSON       →     reads latest Intent,
     {target_speed_kmh,                    emits steer / accel / brake
-     racing_line_offset_m,                flags (the same PlayerInput
-     aggression}                          that humans / Python bots emit)
+     racing_line_offset_m,                / nitro flags (the same
+     aggression,                          PlayerInput that humans /
+     use_nitro,                           Python bots emit)
+     target_opponent_index,
+     tactic}
 ```
+
+Intent fields the strategist may emit:
+
+| Field | Range | Meaning |
+|-------|-------|---------|
+| `target_speed_kmh` | 40–200 | Speed the controller targets next second. |
+| `racing_line_offset_m` | -10 to 10 | Lateral offset from track centre (− left of track direction, + right). |
+| `aggression` | 0.3–1.0 | Tightens steering/speed deadbands. |
+| `use_nitro` | bool (default `false`) | Activate nitro this tick (controller gates on available charges). |
+| `target_opponent_index` | `0`, `1`, or `null` (default `null`) | Index into the observation's opponent slots. |
+| `tactic` | `"race"`, `"overtake"`, `"block"`, `"pit"` (default `"race"`) | Drives how the controller treats the targeted opponent. `block` uses the upcoming turn even without a target. |
 
 The strategist's slow LLM call doesn't block the 20Hz tick — the
 controller holds the last good Intent if a call is in-flight or fails.
 LLM bots and Python bots compete in the same races, against each
 other and against humans, with no special handling beyond the lobby
 add-bot dispatch.
+
+The observation the strategist receives is a fixed-shape text block
+with terrain-aware fields: real `edge_left`/`edge_right` boundary
+distances, `next_turn` direction + sharpness, `upcoming_surface`,
+nitro state, race position, distance to finish, and (for each visible
+opponent) a `closing`/`opening` descriptor. See
+`backend/app/agents/observation.py::format_observation`.
 
 To create one: open **Tinker → New bot → LLM bot**. Fill in the name,
 pick a model from the dropdown (or paste a custom HuggingFace path),

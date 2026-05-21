@@ -36,6 +36,8 @@ def _car(
     speed: float = 0.0,
     surface: str = "asphalt",
     off_track: bool = False,
+    nitro_charges: int = 3,
+    nitro_active: bool = False,
 ) -> BotCarState:
     return BotCarState(
         position=position,
@@ -44,8 +46,8 @@ def _car(
         velocity=(speed * math.cos(heading), speed * math.sin(heading)),
         angular_velocity=0.0,
         health=100.0,
-        nitro_charges=3,
-        nitro_active=False,
+        nitro_charges=nitro_charges,
+        nitro_active=nitro_active,
         current_surface=surface,
         off_track=off_track,
     )
@@ -56,15 +58,18 @@ def _track(
     next_checkpoint: int = 0,
     edge_left: float = 5.0,
     edge_right: float = 5.0,
+    upcoming_surface: str = "asphalt",
+    upcoming_turn: str = "straight",
+    turn_sharpness: float = 0.0,
 ) -> BotTrackState:
     return BotTrackState(
         checkpoints=checkpoints if checkpoints is not None else [],
         next_checkpoint=next_checkpoint,
         distance_to_boundary_left=edge_left,
         distance_to_boundary_right=edge_right,
-        upcoming_surface="asphalt",
-        upcoming_turn="straight",
-        turn_sharpness=0.0,
+        upcoming_surface=upcoming_surface,
+        upcoming_turn=upcoming_turn,
+        turn_sharpness=turn_sharpness,
     )
 
 
@@ -89,13 +94,16 @@ def _state(
     track: Optional[BotTrackState] = None,
     opponents: Optional[List[BotOpponent]] = None,
     rays: Optional[List[BotRaycast]] = None,
+    race: Optional[BotRaceState] = None,
 ) -> BotGameState:
     return BotGameState(
         car=car if car is not None else _car(),
         track=track if track is not None else _track(),
         rays=rays if rays is not None else [],
         opponents=opponents if opponents is not None else [],
-        race=BotRaceState(
+        race=race
+        if race is not None
+        else BotRaceState(
             current_checkpoint=0,
             total_checkpoints=10,
             position=1,
@@ -191,10 +199,16 @@ class TestFormatGolden:
             "off_track: no",
             "edge_left: 5.2 m",
             "edge_right: 4.8 m",
+            "nitro: 3 ready (active: no)",
+            "race_pos: P1/1",
+            "to_finish: 100 m",
+            "next_turn: straight, sharpness=0.0",
+            "upcoming_surface: asphalt",
             "checkpoint[1]: dist=100 m, bearing=0 deg",
             "checkpoint[2]: dist=200 m, bearing=0 deg",
             "checkpoint[3]: dist=300 m, bearing=0 deg",
-            "opponent[1]: dist=50 m, bearing=0 deg, rel_speed=6 km/h",
+            # Our car (speed 20, +x) is catching the opponent (speed 10, +x) → closing.
+            "opponent[1]: dist=50 m, bearing=0 deg, rel_speed=6 km/h, closing",
             "opponent[2]: none",
         ]
 
@@ -217,8 +231,9 @@ class TestSlotStability:
         out = format_observation(state)
         assert "opponent[1]: none" in out
         assert "opponent[2]: none" in out
-        # Total line count fixed regardless of opponent count
-        assert len(out.split("\n")) == 11
+        # Total line count fixed regardless of opponent count: 11 original
+        # + 5 new (nitro, race_pos, to_finish, next_turn, upcoming_surface).
+        assert len(out.split("\n")) == 16
 
     def test_fewer_than_three_remaining_checkpoints_pads_with_none(self):
         state = _state(
@@ -282,6 +297,141 @@ class TestHeadingRotatesBearings:
 
 
 # ===== Pure / deterministic =====
+
+
+class TestNewObservationLines:
+    """Lines added with the LLM-driving uplift: nitro, race position,
+    distance to finish, next turn + sharpness, upcoming surface, and the
+    closing/opening descriptor on opponents."""
+
+    def test_nitro_line_reflects_state(self):
+        out = format_observation(
+            _state(car=_car(nitro_charges=2, nitro_active=False))
+        )
+        assert "nitro: 2 ready (active: no)" in out
+
+    def test_nitro_active_line(self):
+        out = format_observation(
+            _state(car=_car(nitro_charges=0, nitro_active=True))
+        )
+        assert "nitro: 0 ready (active: yes)" in out
+
+    def test_race_pos_line(self):
+        out = format_observation(
+            _state(
+                race=BotRaceState(
+                    current_checkpoint=2,
+                    total_checkpoints=10,
+                    position=3,
+                    total_cars=8,
+                    elapsed_time=12.5,
+                    distance_to_finish=1850.0,
+                ),
+            )
+        )
+        assert "race_pos: P3/8" in out
+        assert "to_finish: 1850 m" in out
+
+    def test_next_turn_line_left(self):
+        out = format_observation(
+            _state(
+                track=_track(
+                    upcoming_turn="left",
+                    turn_sharpness=0.6,
+                ),
+            )
+        )
+        assert "next_turn: left, sharpness=0.6" in out
+
+    def test_next_turn_line_right_with_sharpness_rounding(self):
+        out = format_observation(
+            _state(
+                track=_track(
+                    upcoming_turn="right",
+                    turn_sharpness=0.876,
+                ),
+            )
+        )
+        assert "next_turn: right, sharpness=0.9" in out
+
+    def test_upcoming_surface_line(self):
+        out = format_observation(
+            _state(track=_track(upcoming_surface="gravel"))
+        )
+        assert "upcoming_surface: gravel" in out
+
+
+class TestOpponentClosure:
+    """Closing/opening descriptor on opponent lines."""
+
+    def test_overtaking_opponent_is_closing(self):
+        # Our car at origin going +x at 30 u/s; opponent ahead at +x going
+        # +x at only 10 u/s. We're catching them.
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0, speed=30.0),
+            opponents=[
+                _opponent(
+                    position=(40.0, 0.0),
+                    velocity=(10.0, 0.0),
+                    distance=40.0,
+                    relative_angle=0.0,
+                )
+            ],
+        )
+        out = format_observation(state)
+        assert "closing" in out
+        assert "opening" not in out
+
+    def test_pulled_away_opponent_is_opening(self):
+        # We're slow; opponent ahead is much faster → distance growing.
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0, speed=5.0),
+            opponents=[
+                _opponent(
+                    position=(40.0, 0.0),
+                    velocity=(50.0, 0.0),
+                    distance=40.0,
+                    relative_angle=0.0,
+                )
+            ],
+        )
+        out = format_observation(state)
+        assert "opening" in out
+        # "closing" appears as a token; ensure it's not used for this opp
+        assert ", opening" in out
+
+    def test_opponent_directly_behind_approaching_is_closing(self):
+        # Opponent behind us, both moving +x. We're slow, they're fast →
+        # they're catching us.
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0, speed=5.0),
+            opponents=[
+                _opponent(
+                    position=(-30.0, 0.0),
+                    velocity=(40.0, 0.0),
+                    distance=30.0,
+                    relative_angle=math.pi,  # directly behind
+                )
+            ],
+        )
+        out = format_observation(state)
+        assert "closing" in out
+
+    def test_zero_distance_does_not_crash(self):
+        state = _state(
+            car=_car(position=(0.0, 0.0), speed=10.0),
+            opponents=[
+                _opponent(
+                    position=(0.0, 0.0),
+                    velocity=(5.0, 5.0),
+                    distance=0.0,
+                    relative_angle=0.0,
+                )
+            ],
+        )
+        # Just make sure it doesn't raise; descriptor falls back to closing.
+        out = format_observation(state)
+        assert "closing" in out
 
 
 class TestPureFunction:

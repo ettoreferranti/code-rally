@@ -40,10 +40,28 @@ _MIN_TARGET_SPEED_KMH = 30.0
 # below is always appended on top, so the model still sees the JSON
 # format requirements even if the strategy text doesn't mention them.
 DEFAULT_STRATEGY_PROMPT = (
-    "You are a rally driver racing to finish the stage AS FAST AS POSSIBLE. "
-    "Top speed is around 180 km/h. Wet, gravel, and ice surfaces reduce "
-    "grip but you still race — pick a safer speed and a wider racing line, "
-    "but never stop."
+    "You are an expert rally driver. Your job is to finish the stage as "
+    "quickly as possible without crashing. Top speed is ~180 km/h.\n\n"
+    "Driving principles:\n"
+    "- Cornering: brake BEFORE the corner (look at next_turn and "
+    "  sharpness), apex tight (negative offset into a left turn, "
+    "  positive into a right), accelerate on the exit. Sharper corners "
+    "  (sharpness > 0.5) need bigger speed drops.\n"
+    "- Racing line: stay wide on entry, clip the apex, drift wide on "
+    "  exit. The offset is in metres from the track centreline.\n"
+    "- Surfaces: asphalt is full grip; wet ~85%, gravel ~70%, ice ~50%. "
+    "  Drop target speed and widen the line on low-grip surfaces. Watch "
+    "  upcoming_surface so you brake before a surface change.\n"
+    "- Track edges: edge_left / edge_right tell you how much room you "
+    "  have. If one is near zero, pull toward the other side.\n"
+    "- Nitro: use it on long straights or to complete an overtake. "
+    "  Don't waste charges mid-corner.\n"
+    "- Other cars: in close racing, set target_opponent_index and a "
+    "  tactic. 'overtake' to pass cleanly, 'pit' to bump them off line, "
+    "  'block' to defend the inside of the next corner. Otherwise leave "
+    "  tactic='race' and ignore other cars.\n\n"
+    "Never set a target below 40 km/h — keep moving even on tricky "
+    "surfaces."
 )
 
 # Invariant. Must stay in sync with ``_parse_intent`` and the ``Intent``
@@ -51,20 +69,41 @@ DEFAULT_STRATEGY_PROMPT = (
 # controller silently falling back to defaults on parse failures.
 # NOT exposed to users.
 PROTOCOL_PROMPT = (
-    "Given the observation, decide your driving intent for the next second.\n\n"
-    "Output ONLY a JSON object with these fields:\n"
-    '  "target_speed_kmh": number between 40 and 200\n'
-    "     (40-70 on tight corners or low-grip surfaces; 80-130 on flowing "
-    "corners; 130-180 on straights. NEVER output less than 40.)\n"
-    '  "racing_line_offset_m": number between -10 and 10 (negative = left of centre)\n'
-    '  "aggression": number between 0.3 and 1.0 '
-    "(0.3 = careful, 1.0 = full attack; use 0.5+ on most segments)\n\n"
+    "Output ONLY a JSON object. No prose, no markdown, no code fences.\n\n"
+    "Required fields:\n"
+    '  "target_speed_kmh": number 40–200 '
+    "(40–70 tight corners or low grip; 80–130 flowing corners; 130–180 "
+    "straights). NEVER below 40.\n"
+    '  "racing_line_offset_m": number -10 to 10 '
+    "(negative = left of centre, positive = right of centre).\n"
+    '  "aggression": number 0.3–1.0 '
+    "(0.3 = careful, 1.0 = full attack).\n\n"
+    "Optional fields (omit when not relevant; defaults shown):\n"
+    '  "use_nitro": true|false (default false). Set true ONLY on long '
+    "straights or to finish an overtake; ignored when nitro charges = 0.\n"
+    '  "target_opponent_index": 0|1|null (default null). 0 = opponent[1], '
+    "1 = opponent[2] from the observation. null = no target.\n"
+    '  "tactic": "race"|"overtake"|"block"|"pit" (default "race"). '
+    "Only matters when a target_opponent_index is set (except 'block', "
+    "which uses the upcoming turn).\n\n"
     "Examples:\n"
-    "Observation: speed=20 km/h, next checkpoint=120m straight ahead, surface=asphalt\n"
-    'Intent: {"target_speed_kmh": 170, "racing_line_offset_m": 0, "aggression": 0.7}\n\n'
-    "Observation: speed=120 km/h, next checkpoint=40m bearing 45 deg, surface=gravel\n"
-    'Intent: {"target_speed_kmh": 65, "racing_line_offset_m": -2, "aggression": 0.5}\n\n'
-    "Output nothing else. No prose, no markdown, no code fences."
+    "Observation: long straight, no nearby opponents, asphalt\n"
+    'Intent: {"target_speed_kmh": 175, "racing_line_offset_m": 0, '
+    '"aggression": 0.9, "use_nitro": true}\n\n'
+    "Observation: 40m to sharp left corner, sharpness=0.7, gravel\n"
+    'Intent: {"target_speed_kmh": 65, "racing_line_offset_m": 4, '
+    '"aggression": 0.6}\n  '
+    "(positive offset = stay wide on the entry of the left-hander)\n\n"
+    "Observation: opponent[1] dist=30m bearing=15 deg closing, "
+    "straight ahead\n"
+    'Intent: {"target_speed_kmh": 160, "racing_line_offset_m": -5, '
+    '"aggression": 0.9, "target_opponent_index": 0, "tactic": "overtake"}\n\n'
+    "Observation: opponent[1] dist=18m bearing=180 deg closing, "
+    "next_turn=right sharpness=0.5\n"
+    'Intent: {"target_speed_kmh": 110, "racing_line_offset_m": 0, '
+    '"aggression": 0.8, "tactic": "block"}\n  '
+    "(no target needed; block uses the upcoming turn)\n\n"
+    "Output the JSON only."
 )
 
 

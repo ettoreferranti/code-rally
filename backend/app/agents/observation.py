@@ -34,10 +34,15 @@ Example output::
     off_track: no
     edge_left: 5.2 m
     edge_right: 4.8 m
+    nitro: 2 ready (active: no)
+    race_pos: P2/4
+    to_finish: 1850 m
+    next_turn: left, sharpness=0.6
+    upcoming_surface: gravel
     checkpoint[1]: dist=120 m, bearing=15 deg
     checkpoint[2]: dist=180 m, bearing=-30 deg
     checkpoint[3]: dist=240 m, bearing=20 deg
-    opponent[1]: dist=45 m, bearing=-90 deg, rel_speed=10 km/h
+    opponent[1]: dist=45 m, bearing=-90 deg, rel_speed=10 km/h, closing
     opponent[2]: none
 """
 
@@ -46,7 +51,7 @@ from __future__ import annotations
 import math
 from typing import List, Tuple
 
-from app.bot_runtime.types import BotGameState, BotOpponent
+from app.bot_runtime.types import BotCarState, BotGameState, BotOpponent
 
 
 _NUM_CHECKPOINT_SLOTS = 3
@@ -76,11 +81,22 @@ def format_observation(state: BotGameState) -> str:
     lines.append(f"off_track: {'yes' if state.car.off_track else 'no'}")
     lines.append(f"edge_left: {state.track.distance_to_boundary_left:.1f} m")
     lines.append(f"edge_right: {state.track.distance_to_boundary_right:.1f} m")
+    lines.append(
+        f"nitro: {state.car.nitro_charges} ready "
+        f"(active: {'yes' if state.car.nitro_active else 'no'})"
+    )
+    lines.append(f"race_pos: P{state.race.position}/{state.race.total_cars}")
+    lines.append(f"to_finish: {state.race.distance_to_finish:.0f} m")
+    lines.append(
+        f"next_turn: {state.track.upcoming_turn}, "
+        f"sharpness={state.track.turn_sharpness:.1f}"
+    )
+    lines.append(f"upcoming_surface: {state.track.upcoming_surface}")
 
     for idx, line in enumerate(_format_checkpoints(state), start=1):
         lines.append(f"checkpoint[{idx}]: {line}")
 
-    for idx, line in enumerate(_format_opponents(state.opponents), start=1):
+    for idx, line in enumerate(_format_opponents(state.opponents, state.car), start=1):
         lines.append(f"opponent[{idx}]: {line}")
 
     return "\n".join(lines)
@@ -105,27 +121,51 @@ def _format_checkpoints(state: BotGameState) -> List[str]:
     return out
 
 
-def _format_opponents(opponents: List[BotOpponent]) -> List[str]:
+def _format_opponents(
+    opponents: List[BotOpponent], car: BotCarState
+) -> List[str]:
     """Return exactly _NUM_OPPONENT_SLOTS lines for the nearest opponents.
 
-    We trust ``BotOpponent.distance`` and ``BotOpponent.relative_angle``
-    (already car-relative) but compute relative speed ourselves to keep
-    the formatter self-contained.
+    The output adds a "closing" / "opening" descriptor derived from the
+    component of the relative velocity along the car-to-opponent axis.
+    ``rel_speed`` remains the opponent's absolute speed magnitude
+    (matching the historical field name) since that's what a driver
+    would estimate by eye.
     """
     nearest = sorted(opponents, key=lambda o: o.distance)[:_NUM_OPPONENT_SLOTS]
 
     out: List[str] = []
     for opp in nearest:
         bearing_deg = _wrap_signed_deg(math.degrees(opp.relative_angle))
-        rel_speed_kmh = math.hypot(opp.velocity[0], opp.velocity[1]) * _UNITS_TO_KMH
+        opp_speed_kmh = math.hypot(opp.velocity[0], opp.velocity[1]) * _UNITS_TO_KMH
+        descriptor = _closure_descriptor(car, opp)
         out.append(
             f"dist={opp.distance:.0f} m, bearing={bearing_deg:.0f} deg, "
-            f"rel_speed={rel_speed_kmh:.0f} km/h"
+            f"rel_speed={opp_speed_kmh:.0f} km/h, {descriptor}"
         )
     # Pad with "none" so total slot count is fixed
     while len(out) < _NUM_OPPONENT_SLOTS:
         out.append("none")
     return out
+
+
+def _closure_descriptor(car: BotCarState, opp: BotOpponent) -> str:
+    """Return "closing" or "opening" based on rate of distance change.
+
+    closure_rate = -(rel_vel · unit_vector_from_us_to_them); positive
+    means distance is shrinking. Ties round to "closing" (more
+    conservative for the LLM).
+    """
+    rx = opp.position[0] - car.position[0]
+    ry = opp.position[1] - car.position[1]
+    norm = math.hypot(rx, ry)
+    if norm == 0.0:
+        return "closing"
+    ux, uy = rx / norm, ry / norm
+    rel_vx = opp.velocity[0] - car.velocity[0]
+    rel_vy = opp.velocity[1] - car.velocity[1]
+    closure_rate = -(rel_vx * ux + rel_vy * uy)
+    return "closing" if closure_rate >= 0.0 else "opening"
 
 
 def _polar_relative_to(

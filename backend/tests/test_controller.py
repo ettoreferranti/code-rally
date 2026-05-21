@@ -16,6 +16,7 @@ from app.agents.intent import Intent
 from app.bot_runtime.types import (
     BotCarState,
     BotGameState,
+    BotOpponent,
     BotRaceState,
     BotTrackState,
 )
@@ -28,6 +29,7 @@ def _car(
     position: Tuple[float, float] = (0.0, 0.0),
     heading: float = 0.0,
     speed: float = 0.0,  # engine units/s (multiply by _UNITS_TO_KMH=0.6 for km/h)
+    nitro_charges: int = 3,
 ) -> BotCarState:
     return BotCarState(
         position=position,
@@ -36,7 +38,7 @@ def _car(
         velocity=(speed * math.cos(heading), speed * math.sin(heading)),
         angular_velocity=0.0,
         health=100.0,
-        nitro_charges=3,
+        nitro_charges=nitro_charges,
         nitro_active=False,
         current_surface="asphalt",
         off_track=False,
@@ -47,6 +49,8 @@ def _state(
     car: Optional[BotCarState] = None,
     checkpoints: Optional[List[Tuple[float, float]]] = None,
     next_checkpoint: int = 0,
+    upcoming_turn: str = "straight",
+    opponents: Optional[List[BotOpponent]] = None,
 ) -> BotGameState:
     return BotGameState(
         car=car if car is not None else _car(),
@@ -56,11 +60,11 @@ def _state(
             distance_to_boundary_left=5.0,
             distance_to_boundary_right=5.0,
             upcoming_surface="asphalt",
-            upcoming_turn="straight",
+            upcoming_turn=upcoming_turn,
             turn_sharpness=0.0,
         ),
         rays=[],
-        opponents=[],
+        opponents=opponents if opponents is not None else [],
         race=BotRaceState(
             current_checkpoint=0,
             total_checkpoints=10,
@@ -72,15 +76,36 @@ def _state(
     )
 
 
+def _opp(
+    position: Tuple[float, float],
+    velocity: Tuple[float, float] = (0.0, 0.0),
+    distance: float = 0.0,
+    relative_angle: float = 0.0,
+) -> BotOpponent:
+    return BotOpponent(
+        position=position,
+        velocity=velocity,
+        heading=0.0,
+        distance=distance if distance else math.hypot(position[0], position[1]),
+        relative_angle=relative_angle,
+    )
+
+
 def _intent(
     target_speed_kmh: float = 80.0,
     racing_line_offset_m: float = 0.0,
     aggression: float = 0.5,
+    use_nitro: bool = False,
+    target_opponent_index=None,
+    tactic: str = "race",
 ) -> Intent:
     return Intent(
         target_speed_kmh=target_speed_kmh,
         racing_line_offset_m=racing_line_offset_m,
         aggression=aggression,
+        use_nitro=use_nitro,
+        target_opponent_index=target_opponent_index,
+        tactic=tactic,
     )
 
 
@@ -362,3 +387,259 @@ class TestRobustness:
         elapsed = time.perf_counter() - start
         per_call_ms = (elapsed / 1000) * 1000
         assert per_call_ms < 1.0, f"controller too slow: {per_call_ms:.3f} ms/call"
+
+
+# ===== Two-checkpoint blended lookahead =====
+
+
+class TestBlendedLookahead:
+    """The lookahead used to be ``cp[next]`` alone. After the driving uplift
+    it blends in ``cp[next+1]`` once the car is within
+    ``_LOOKAHEAD_BLEND_RADIUS_M`` (default 60 m) of ``cp[next]``. This is
+    what makes geometric anticipation (and racing lines) expressible.
+    """
+
+    def test_far_from_corner_behaves_like_single_checkpoint(self):
+        # Car well outside the blend radius from cp[next]; cp[next+1] is a
+        # right turn. Lookahead should still be straight ahead.
+        ctrl = Controller()
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0),
+            # cp[next] at 200m (far past 60m blend radius); cp[next+1] is
+            # a corner. With no blend, lookahead = cp[next] dead ahead.
+            checkpoints=[(200.0, 0.0), (200.0, 100.0)],
+        )
+        out = ctrl.compute(_intent(), state)
+        assert not out.turn_left and not out.turn_right
+
+    def test_close_to_corner_anticipates_by_steering_toward_exit(self):
+        # Car 10m from cp[next] (well inside blend); cp[next+1] is to the
+        # right. The blended lookahead should pull the car right BEFORE
+        # reaching cp[next].
+        ctrl = Controller()
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0),
+            checkpoints=[(10.0, 0.0), (10.0, 100.0)],
+        )
+        out = ctrl.compute(_intent(), state)
+        assert out.turn_right and not out.turn_left
+
+    def test_blend_falls_back_with_only_one_checkpoint(self):
+        # Single-checkpoint case (legacy) — must not crash and must aim
+        # at the lone checkpoint.
+        ctrl = Controller()
+        state = _state(
+            car=_car(position=(0.0, 0.0), heading=0.0),
+            checkpoints=[(100.0, 0.0)],
+        )
+        out = ctrl.compute(_intent(), state)
+        assert isinstance(out, ControlInputs)
+        assert not out.turn_left and not out.turn_right
+
+    def test_offset_is_perpendicular_to_blended_direction(self):
+        # cp[next]→cp[next+1] runs south (+y in y-down = visually down).
+        # The track-direction perpendicular-right is (-1, 0) (west). A
+        # positive offset shifts the lookahead toward -x. Car at the side
+        # of cp[next] should then steer toward -x. Since the car faces +x,
+        # that means a LEFT turn (toward heading rotated -90°? no — toward
+        # the lookahead).
+        ctrl = Controller()
+        # Car at (50, 0); cp[next]=(100, 0) (50 m away ⇒ inside blend);
+        # cp[next+1]=(100, 100) → corner direction is south.
+        state = _state(
+            car=_car(position=(50.0, 0.0), heading=0.0),
+            checkpoints=[(100.0, 0.0), (100.0, 100.0)],
+        )
+        # With offset=+10, lookahead shifts ~10 toward -x relative to the
+        # blended target. Even so, the lookahead remains in front-and-right
+        # of the car (cp[next+1] is south of the car), so we still expect
+        # a right turn — just LESS aggressive than with offset=0.
+        out_zero = ctrl.compute(_intent(racing_line_offset_m=0.0), state)
+        # Reset controller state by using a fresh instance (avoid speed
+        # rate-of-change carryover).
+        out_off = Controller().compute(_intent(racing_line_offset_m=10.0), state)
+        # Both turn right (lookahead is south of car); offset=+10 must not
+        # invert the turn direction in this geometry.
+        assert out_zero.turn_right
+        assert out_off.turn_right
+
+
+# ===== Nitro pass-through =====
+
+
+class TestNitroPassThrough:
+    """Intent.use_nitro must flow through to ControlInputs.nitro, gated
+    only by available charges on the car.
+    """
+
+    def test_use_nitro_true_with_charges_emits_nitro(self):
+        ctrl = Controller()
+        state = _state(car=_car(speed=200.0, nitro_charges=2))
+        out = ctrl.compute(_intent(use_nitro=True), state)
+        assert out.nitro is True
+
+    def test_use_nitro_false_does_not_emit_nitro(self):
+        ctrl = Controller()
+        state = _state(car=_car(speed=200.0, nitro_charges=2))
+        out = ctrl.compute(_intent(use_nitro=False), state)
+        assert out.nitro is False
+
+    def test_use_nitro_true_with_zero_charges_does_not_emit(self):
+        # The engine would reject anyway, but the controller surfaces the
+        # gate so observability matches reality.
+        ctrl = Controller()
+        state = _state(car=_car(speed=200.0, nitro_charges=0))
+        out = ctrl.compute(_intent(use_nitro=True), state)
+        assert out.nitro is False
+
+    def test_legacy_intent_without_nitro_field_does_not_emit(self):
+        ctrl = Controller()
+        state = _state(car=_car(speed=200.0, nitro_charges=2))
+        # Default Intent (use_nitro unset) is the legacy 3-field shape.
+        out = ctrl.compute(
+            Intent(target_speed_kmh=80, racing_line_offset_m=0, aggression=0.5),
+            state,
+        )
+        assert out.nitro is False
+
+    def test_fallback_intent_never_emits_nitro(self):
+        ctrl = Controller()
+        state = _state(car=_car(speed=0.0, nitro_charges=3))
+        out = ctrl.compute(None, state)
+        assert out.nitro is False
+
+
+# ===== Tactic resolution =====
+
+
+class TestTacticResolution:
+    """``tactic`` + ``target_opponent_index`` translates into an effective
+    lateral offset that may override ``racing_line_offset_m``. These tests
+    pin down the direction of the override.
+
+    Geometry: car at origin facing +x; cp[next]=(100,0), cp[next+1]=(200,0)
+    so the racing line is straight. Any non-zero turn signal in this
+    setup must come from the tactic-driven lateral offset.
+    """
+
+    def _straight_state(self, opponents=None, upcoming_turn="straight"):
+        return _state(
+            car=_car(position=(0.0, 0.0), heading=0.0),
+            checkpoints=[(100.0, 0.0), (200.0, 0.0)],
+            upcoming_turn=upcoming_turn,
+            opponents=opponents or [],
+        )
+
+    def test_overtake_with_opponent_on_right_steers_left(self):
+        # Opponent ahead-right (positive relative_angle in y-down).
+        opp = _opp(
+            position=(80.0, 20.0),
+            distance=82.4,
+            relative_angle=math.radians(15),
+        )
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(target_opponent_index=0, tactic="overtake"),
+            self._straight_state(opponents=[opp]),
+        )
+        # tactic-driven offset is negative ⇒ lookahead shifts to track-LEFT
+        # ⇒ -y in y-down ⇒ left of a +x-facing driver ⇒ LEFT turn.
+        assert out.turn_left and not out.turn_right
+
+    def test_overtake_with_opponent_on_left_steers_right(self):
+        opp = _opp(
+            position=(80.0, -20.0),
+            distance=82.4,
+            relative_angle=math.radians(-15),
+        )
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(target_opponent_index=0, tactic="overtake"),
+            self._straight_state(opponents=[opp]),
+        )
+        assert out.turn_right and not out.turn_left
+
+    def test_pit_aims_toward_opponent(self):
+        # Opponent on the right ⇒ pit shifts offset RIGHT (toward opp) ⇒
+        # right turn.
+        opp = _opp(
+            position=(80.0, 20.0),
+            distance=82.4,
+            relative_angle=math.radians(15),
+        )
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(target_opponent_index=0, tactic="pit"),
+            self._straight_state(opponents=[opp]),
+        )
+        assert out.turn_right and not out.turn_left
+
+    def test_block_on_right_turn_pulls_to_inside_right(self):
+        # No target needed for block — uses upcoming turn direction.
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(tactic="block"),
+            self._straight_state(opponents=[], upcoming_turn="right"),
+        )
+        assert out.turn_right and not out.turn_left
+
+    def test_block_on_left_turn_pulls_to_inside_left(self):
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(tactic="block"),
+            self._straight_state(opponents=[], upcoming_turn="left"),
+        )
+        assert out.turn_left and not out.turn_right
+
+    def test_block_on_straight_falls_back_to_llm_offset(self):
+        # No inside line to claim ⇒ honour the LLM's offset (here zero).
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(racing_line_offset_m=0.0, tactic="block"),
+            self._straight_state(upcoming_turn="straight"),
+        )
+        assert not out.turn_left and not out.turn_right
+
+    def test_overtake_with_no_visible_target_falls_back_to_llm_offset(self):
+        # LLM hallucinates a target in a solo race; the controller must
+        # not crash and must honour the LLM's racing_line_offset_m.
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(
+                racing_line_offset_m=10.0,
+                target_opponent_index=0,
+                tactic="overtake",
+            ),
+            self._straight_state(opponents=[]),
+        )
+        # +10 offset, straight track ⇒ right turn (matches legacy behaviour).
+        assert out.turn_right and not out.turn_left
+
+    def test_overtake_targets_correct_opponent_slot(self):
+        # Two opponents; slot 0 = nearest. The controller should respond
+        # to slot 0 (the nearest), not slot 1.
+        near = _opp(
+            position=(30.0, -10.0),
+            distance=31.6,
+            relative_angle=math.radians(-18),
+        )
+        far = _opp(
+            position=(150.0, 50.0),
+            distance=158.1,
+            relative_angle=math.radians(18),
+        )
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(target_opponent_index=0, tactic="overtake"),
+            self._straight_state(opponents=[far, near]),  # unordered on purpose
+        )
+        # Nearest opp on the LEFT ⇒ overtake shifts RIGHT ⇒ right turn.
+        assert out.turn_right and not out.turn_left
+
+    def test_race_tactic_honours_llm_offset(self):
+        ctrl = Controller()
+        out = ctrl.compute(
+            _intent(racing_line_offset_m=-10.0, tactic="race"),
+            self._straight_state(),
+        )
+        assert out.turn_left and not out.turn_right

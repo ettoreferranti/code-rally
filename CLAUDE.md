@@ -382,18 +382,66 @@ in `backend/app/core/engine.py`.
 The system prompt sent to MLX is assembled in two parts (see
 `backend/app/agents/llm_strategist.py`):
 
-- `DEFAULT_STRATEGY_PROMPT` — persona + driving heuristics.
-  User-editable via the Tinker "Driving strategy" textarea.
-- `PROTOCOL_PROMPT` — JSON output format, field ranges, examples,
-  "no prose/markdown/code fences". **Invariant**, always appended.
-  Must stay in sync with `_parse_intent` and the `Intent` pydantic
-  model. Not exposed to users.
+- `DEFAULT_STRATEGY_PROMPT` — persona + racing pedagogy
+  (braking/apex/exit, surface adjustments, nitro and tactical
+  guidance). User-editable via the Tinker "Driving strategy"
+  textarea.
+- `PROTOCOL_PROMPT` — JSON output format, field ranges (including
+  the optional `use_nitro`, `target_opponent_index`, `tactic` fields
+  added in the driving uplift), examples, "no prose/markdown/code
+  fences". **Invariant**, always appended. Must stay in sync with
+  `_parse_intent` and the `Intent` pydantic model. Not exposed to
+  users.
 
 `build_prompt(observation, system_prompt)` emits
 `<strategy>\n\n<PROTOCOL>\n\nObservation:...`. Existing user-saved
 prompts that still contain old JSON-format boilerplate aren't
 migrated — they're just redundant, since the protocol is appended
 on top regardless.
+
+### LLM Intent + observation (driving uplift)
+
+`Intent` (pydantic, `backend/app/agents/intent.py`) carries six
+fields: `target_speed_kmh`, `racing_line_offset_m`, `aggression`
+(originals), plus `use_nitro: bool=False`,
+`target_opponent_index: 0|1|None=None`, and
+`tactic: "race"|"overtake"|"block"|"pit" = "race"`. Defaults
+preserve backward compatibility — old 3-field JSON still parses.
+
+The observation (`backend/app/agents/observation.py`) is a 16-line
+fixed-shape text block. Beyond the original speed/heading/surface/
+edges/3 checkpoints/2 opponents, it now exposes `nitro: N ready
+(active: yes|no)`, `race_pos: P<n>/<total>`, `to_finish: <m> m`,
+`next_turn: <dir>, sharpness=<f>`, `upcoming_surface: <surface>`,
+and a `closing`/`opening` descriptor on each opponent.
+
+`backend/app/core/terrain.py` computes the real geometry behind
+those new fields:
+
+- `boundary_distances(position, track)` — true left/right edge
+  distances from the nearest segment (replaces the old hardcoded
+  `100.0` placeholder).
+- `upcoming_turn(track, idx)` — direction (`"left"|"right"|"straight"`)
+  and sharpness 0..1 from the angle at the next checkpoint.
+- `upcoming_surface(track, idx)` — surface at the segment closest
+  to the next checkpoint.
+
+The `Controller` (`backend/app/agents/controller.py`) consumes these:
+
+- **Two-checkpoint blended lookahead** (`_LOOKAHEAD_BLEND_RADIUS_M`
+  default 60m). Outside the blend radius the steering target is
+  `cp[next]` (legacy behaviour). Inside, it slides toward
+  `cp[next+1]`, giving real corner-anticipation geometry.
+- `racing_line_offset_m` is applied perpendicular to the **blended**
+  track direction (`cp[next] → cp[next+1]`).
+- `intent.use_nitro` flows through to `ControlInputs.nitro`, gated
+  on `state.car.nitro_charges > 0`.
+- `tactic` resolution (see `_resolve_offset`): `overtake` shifts the
+  offset to the opposite side of the targeted opponent; `pit` shifts
+  toward them; `block` claims the inside of the upcoming turn (no
+  target needed); `race` (default) uses `racing_line_offset_m`
+  verbatim. When a tactic references a missing opponent, the
+  resolver falls through to the LLM's offset rather than crashing.
 
 ## Testing Requirements
 
@@ -510,6 +558,10 @@ from another device on the same network).
 | `backend/app/core/lobby.py` | `LobbySettings` (incl. `track_length`, `track_curves`) |
 | `backend/app/api/routes/game.py` | Game WS; `regenerate_track` handler; `_serialize_track` |
 | `backend/app/agents/llm_strategist.py` | `DEFAULT_STRATEGY_PROMPT` + invariant `PROTOCOL_PROMPT`; `build_prompt` |
+| `backend/app/agents/intent.py` | `Intent` schema (incl. `use_nitro`, `target_opponent_index`, `tactic`) |
+| `backend/app/agents/observation.py` | 16-line text observation; closure descriptor on opponents |
+| `backend/app/agents/controller.py` | 20Hz controller; two-checkpoint blend; `_resolve_offset` for tactic |
+| `backend/app/core/terrain.py` | Real boundary / upcoming-turn / upcoming-surface computation |
 | `backend/app/bot_runtime/sandbox.py` | Bot execution |
 | `frontend/src/game/renderer.ts` | Canvas rendering (stylized cars, drift/nitro effects) |
 | `frontend/src/game/input.js` | Keyboard handling |

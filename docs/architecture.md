@@ -94,17 +94,18 @@ backend/
 │   │   ├── physics.py        # Car physics + drift mechanics
 │   │   ├── track.py          # Procedural track generation
 │   │   ├── bot_manager.py    # Python-bot dispatch into the engine
+│   │   ├── terrain.py        # Boundary distance, upcoming turn/surface helpers
 │   │   ├── raycast.py        # Bot vision sensors
 │   │   ├── lobby.py          # Lobby + LobbyMember dataclasses
 │   │   └── lobby_manager.py  # Lobby state + unified add_bot_to_lobby
 │   │
 │   ├── agents/               # LLM driver (research playground)
 │   │   ├── llm_strategist.py # ~1Hz async, observation → Intent
-│   │   ├── controller.py     # 20Hz deterministic, Intent → flags
-│   │   ├── observation.py    # BotGameState → compact text
+│   │   ├── controller.py     # 20Hz deterministic; two-checkpoint blend; tactic resolver
+│   │   ├── observation.py    # BotGameState → compact text (16 lines)
 │   │   ├── llm_bot.py        # Per-car wrapper for engine dispatch
 │   │   ├── mlx_runtime.py    # Per-model_path cache + shared executor
-│   │   ├── intent.py         # Pydantic Intent schema
+│   │   ├── intent.py         # Pydantic Intent schema (incl. use_nitro / tactic)
 │   │   ├── model_presets.py  # Reads llm_model_presets.json
 │   │   └── llm_model_presets.json   # Curated model list (editable)
 │   │

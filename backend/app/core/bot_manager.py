@@ -22,6 +22,7 @@ from app.bot_runtime.types import (
 )
 from app.core.raycast import RaycastSystem
 from app.core.physics import Vector2
+from app.core.terrain import boundary_distances, upcoming_surface, upcoming_turn
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -221,14 +222,19 @@ class BotManager:
                 distance = math.sqrt((cp_pos[0] - bot_pos.x)**2 + (cp_pos[1] - bot_pos.y)**2)
                 logger.debug(f"Bot {player_id}: pos=({bot_pos.x:.1f},{bot_pos.y:.1f}), speed={player.car.velocity.magnitude():.1f}, cp={next_checkpoint_idx} at ({cp_pos[0]:.1f},{cp_pos[1]:.1f}), dist={distance:.1f}")
 
+        edge_left, edge_right = boundary_distances(
+            (player.car.position.x, player.car.position.y), track
+        )
+        turn_dir, turn_sharp = upcoming_turn(track, next_checkpoint_idx)
+        upcoming_surf = upcoming_surface(track, next_checkpoint_idx)
         bot_track = BotTrackState(
             checkpoints=checkpoints_list,
             next_checkpoint=next_checkpoint_idx,
-            distance_to_boundary_left=100.0,  # TODO: Calculate actual distances
-            distance_to_boundary_right=100.0,
-            upcoming_surface="asphalt",  # TODO: Look ahead for surface
-            upcoming_turn="straight",  # TODO: Analyze track curvature
-            turn_sharpness=0.0
+            distance_to_boundary_left=edge_left,
+            distance_to_boundary_right=edge_right,
+            upcoming_surface=upcoming_surf,
+            upcoming_turn=turn_dir,
+            turn_sharpness=turn_sharp,
         )
 
         # Create opponent list (fog of war - only show nearby opponents)
