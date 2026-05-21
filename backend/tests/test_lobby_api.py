@@ -31,6 +31,133 @@ def reset_lobby_manager():
     yield
 
 
+# ===== Lobby leave / WS-disconnect behaviour =====
+
+
+class TestHandleLeaveLobbyDuringRace:
+    """``handle_leave_lobby`` runs both on explicit user leave and on
+    lobby WebSocket disconnect. When the disconnect coincides with a
+    race start (the frontend navigating from /lobby to /race), we MUST
+    NOT remove the player from the lobby — they're in the race, not
+    gone, and removal triggers a spurious host transfer (logged as
+    "transferred from X to X" when the same player reconnects under
+    the same player_id on the race WS).
+    """
+
+    @pytest.mark.asyncio
+    async def test_disconnect_while_racing_preserves_membership(self, monkeypatch):
+        """RACING status: WS close means 'went to race screen', not 'left'."""
+        import asyncio  # noqa: F401 — used implicitly by pytest-asyncio
+        from app.api.routes import game as game_route
+        from app.core.lobby import LobbyStatus
+
+        # Stub the broadcast to avoid pulling in the connection manager.
+        broadcast_calls = []
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            broadcast_calls.append((lobby_id, message))
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        manager = get_lobby_manager()
+        lobby = manager.create_lobby("Race", "host_player")
+        manager.join_lobby(lobby.lobby_id, "player_b", username="bee")
+        lobby.status = LobbyStatus.RACING
+
+        # Disconnect during race → membership stays intact.
+        await game_route.handle_leave_lobby(lobby.lobby_id, "player_b")
+
+        members = manager.get_lobby(lobby.lobby_id).members
+        assert "player_b" in members, "membership must be preserved during race"
+        # No lobby_member_left broadcast — nobody actually left.
+        assert broadcast_calls == []
+
+    @pytest.mark.asyncio
+    async def test_disconnect_while_starting_preserves_membership(self, monkeypatch):
+        """STARTING covers the race-start window between 'host clicked
+        start' and 'lobby transitions to RACING'. Same logic applies.
+        """
+        from app.api.routes import game as game_route
+        from app.core.lobby import LobbyStatus
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            pass
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        manager = get_lobby_manager()
+        lobby = manager.create_lobby("Race", "host_player")
+        manager.join_lobby(lobby.lobby_id, "player_b", username="bee")
+        lobby.status = LobbyStatus.STARTING
+
+        await game_route.handle_leave_lobby(lobby.lobby_id, "player_b")
+
+        assert "player_b" in manager.get_lobby(lobby.lobby_id).members
+
+    @pytest.mark.asyncio
+    async def test_disconnect_while_waiting_still_removes_member(self, monkeypatch):
+        """WAITING: the user really did leave the lobby (or browser
+        crashed). The original removal behaviour is intact.
+        """
+        from app.api.routes import game as game_route
+
+        broadcast_calls = []
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            broadcast_calls.append(message)
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        manager = get_lobby_manager()
+        lobby = manager.create_lobby("Race", "host_player")
+        manager.join_lobby(lobby.lobby_id, "player_b", username="bee")
+        # Lobby still in WAITING by default.
+
+        await game_route.handle_leave_lobby(lobby.lobby_id, "player_b")
+
+        assert "player_b" not in manager.get_lobby(lobby.lobby_id).members
+        # Broadcast was sent.
+        assert any(m["type"] == "lobby_member_left" for m in broadcast_calls)
+
+    @pytest.mark.asyncio
+    async def test_disconnect_after_finished_still_removes_member(self, monkeypatch):
+        """FINISHED: the race is over; the lobby is in results view. A
+        WS close at this point IS the user actually leaving — they're
+        navigating away from the post-race screen.
+        """
+        from app.api.routes import game as game_route
+        from app.core.lobby import LobbyStatus
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            pass
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        manager = get_lobby_manager()
+        lobby = manager.create_lobby("Race", "host_player")
+        manager.join_lobby(lobby.lobby_id, "player_b", username="bee")
+        lobby.status = LobbyStatus.FINISHED
+
+        await game_route.handle_leave_lobby(lobby.lobby_id, "player_b")
+
+        assert "player_b" not in manager.get_lobby(lobby.lobby_id).members
+
+    @pytest.mark.asyncio
+    async def test_disconnect_with_missing_lobby_does_not_raise(self, monkeypatch):
+        """Defensive: a stale lobby_id (already disbanded) must not crash
+        the disconnect handler.
+        """
+        from app.api.routes import game as game_route
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            pass
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        # No lobby with this id exists.
+        await game_route.handle_leave_lobby("nonexistent", "player_x")
+
+
 class TestCreateLobby:
     """Test POST /lobbies endpoint."""
 

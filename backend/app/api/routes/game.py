@@ -459,11 +459,36 @@ async def handle_leave_lobby(lobby_id: str, player_id: str) -> None:
     """
     Handle player leaving a lobby.
 
+    Fired from two places:
+      - Explicit "leave_lobby" message (user hit the leave button), AND
+      - Lobby WebSocket disconnect (browser closed, network drop, OR the
+        frontend navigated from /lobby/:id to /race?session=...).
+
+    The third case is the gotcha: when a race starts, the lobby
+    transitions to RACING and broadcasts the change. The frontend then
+    swaps routes from /lobby to /race, which CLOSES the lobby WS — which
+    looks identical to "user left" from the backend's POV. Without the
+    guard below we'd then call ``leave_lobby``, remove the player from
+    membership, and trigger a host transfer ("transferred from X to X"
+    when X reconnects under the same player_id on the race WS).
+
+    Skip the leave when the lobby is in RACING/STARTING — the player
+    is in the race, not gone. Their membership stays so they re-enter
+    the lobby cleanly when the race ends.
+
     Args:
         lobby_id: Lobby to leave
         player_id: Player identifier
     """
     lobby_manager = get_lobby_manager()
+    lobby = lobby_manager.get_lobby(lobby_id)
+
+    if lobby is not None and lobby.status in (LobbyStatus.STARTING, LobbyStatus.RACING):
+        logger.info(
+            f"Player {player_id} disconnected from lobby {lobby_id} while "
+            f"in {lobby.status.value} — treating as in-race (membership preserved)"
+        )
+        return
 
     # Leave lobby (also handles host transfer and auto-disband)
     lobby_manager.leave_lobby(lobby_id, player_id)

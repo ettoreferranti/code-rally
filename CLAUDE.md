@@ -479,6 +479,18 @@ and returns 5 / 10 / 20 / 30 / 60 seconds respectively. Unknown
 model paths get 15 s. Callers can override by passing
 `strategist_kwargs={"timeout_s": ...}` explicitly.
 
+### Lobby disconnect during race
+
+`handle_leave_lobby` (game route) is invoked from both explicit
+"leave_lobby" messages AND WS disconnects. The frontend's
+navigation from `/lobby/:id` to `/race?session=...` at race start
+closes the lobby WS, which looks identical to a real "left lobby"
+from the backend. To avoid spurious member removal + host transfer
+("transferred from X to X" when X reconnects on the race WS),
+`handle_leave_lobby` now no-ops when the lobby is in
+`STARTING` or `RACING`. Membership is preserved so the player
+re-enters the lobby cleanly when the race ends.
+
 
 ### Thought bubble (visibility)
 
