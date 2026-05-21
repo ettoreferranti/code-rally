@@ -254,23 +254,42 @@ async def broadcast_game_state(session_id: str) -> None:
 
     # When the engine race ends, propagate the FINISHED status back to
     # the lobby that owns this session. Without this, lobbies stay
-    # listed as "in race" forever in the lobby browser (the engine
-    # state would say FINISHED, but the lobby state — used by the
-    # browser — wouldn't). finish_race is idempotent (returns False
-    # after the first transition), so this runs at most once per race.
-    if (
-        session_id in _lobby_sessions
-        and engine.state.race_info.status == RaceStatus.FINISHED
-    ):
-        lobby_manager = get_lobby_manager()
-        lobby = lobby_manager.get_lobby_by_session(session_id)
-        if lobby is not None and lobby_manager.finish_race(lobby.lobby_id):
-            # Transition just fired — refresh the lobby browser + any
-            # connected lobby-mode UIs (spectators, post-race screens).
-            await broadcast_to_lobby(lobby.lobby_id, {
-                'type': 'lobby_state',
-                'data': serialize_lobby_state(lobby)
-            })
+    # listed as "in race" forever in the lobby browser.
+    await _propagate_engine_finish_to_lobby(session_id)
+
+
+async def _propagate_engine_finish_to_lobby(session_id: str) -> bool:
+    """Flip the owning lobby RACING→FINISHED once the engine is FINISHED.
+
+    Runs from two call sites:
+      - ``broadcast_game_state`` — covers the common case where the host
+        is still on the race screen when the race wraps up.
+      - ``state_broadcaster`` — runs every tick regardless of whether any
+        client is currently connected. This is the path that fixes the
+        "stuck RACING" bug: when the host navigates away from /race
+        before the race actually ends, the engine keeps ticking on the
+        server and eventually transitions to FINISHED on its own. Without
+        this second call site, the lobby was left pinned at RACING
+        forever (visible in the lobby browser, un-resettable).
+
+    Idempotent: ``finish_race`` returns True only on the first
+    RACING→FINISHED transition, so subsequent calls are no-ops.
+    Returns True iff the transition just fired (lobby flipped this call).
+    """
+    if session_id not in _lobby_sessions:
+        return False
+    engine = _game_sessions.get(session_id)
+    if engine is None or engine.state.race_info.status != RaceStatus.FINISHED:
+        return False
+    lobby_manager = get_lobby_manager()
+    lobby = lobby_manager.get_lobby_by_session(session_id)
+    if lobby is None or not lobby_manager.finish_race(lobby.lobby_id):
+        return False
+    await broadcast_to_lobby(lobby.lobby_id, {
+        'type': 'lobby_state',
+        'data': serialize_lobby_state(lobby)
+    })
+    return True
 
 
 async def state_broadcaster(session_id: str, update_rate: int = 60) -> None:
@@ -290,9 +309,14 @@ async def state_broadcaster(session_id: str, update_rate: int = 60) -> None:
         interval = 1.0 / update_rate
 
         while session_id in _game_sessions:
-            # Only broadcast if there are connections
             if session_id in manager.active_connections:
                 await broadcast_game_state(session_id)
+            else:
+                # No active connections — still need to flip the lobby
+                # to FINISHED when the engine finishes on its own. The
+                # heavy state_snapshot work in broadcast_game_state is
+                # skipped (no one to send it to).
+                await _propagate_engine_finish_to_lobby(session_id)
             await asyncio.sleep(interval)
     finally:
         # Clean up when broadcaster stops

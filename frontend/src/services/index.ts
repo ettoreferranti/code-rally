@@ -24,6 +24,7 @@ export {
   createLobby,
   updateLobbySettings,
   disbandLobby,
+  resetLobby,
   type LobbySettings,
   type LobbyMember,
   type LobbyListItem,

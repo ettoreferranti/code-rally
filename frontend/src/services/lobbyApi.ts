@@ -178,3 +178,22 @@ export async function disbandLobby(lobbyId: string, playerId: string): Promise<v
     throw new Error(`Failed to disband lobby: ${response.statusText}`);
   }
 }
+
+/**
+ * Reset a FINISHED lobby back to WAITING ("Race Again"). Powered by
+ * POST /lobbies/{id}/reset on the backend; returns the updated lobby.
+ */
+export async function resetLobby(lobbyId: string, playerId: string): Promise<Lobby> {
+  const url = new URL(`${API_BASE_URL}/lobbies/${lobbyId}/reset`);
+  url.searchParams.set('player_id', playerId);
+
+  const response = await fetch(url.toString(), {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to reset lobby: ${response.statusText}`);
+  }
+
+  return response.json();
+}

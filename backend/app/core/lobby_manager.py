@@ -504,35 +504,47 @@ class LobbyManager:
                 return lobby
         return None
 
-    def reset_lobby(self, lobby_id: str, player_id: str) -> bool:
-        """
-        Reset lobby back to WAITING (host only, from FINISHED).
+    def reset_lobby(self, lobby_id: str, player_id: str) -> Optional[str]:
+        """Reset a FINISHED lobby back to WAITING. Returns the dropped
+        ``game_session_id`` (so callers can also clean up the engine in
+        ``_game_sessions``), or ``None`` if the reset was refused.
 
-        Args:
-            lobby_id: Lobby to reset
-            player_id: Player attempting reset (must be host)
-
-        Returns:
-            True if successful, False otherwise
+        Permitted for the current host OR the creator — same rule as
+        ``disband_lobby``: a host transfer to a bot must not lock the
+        creator out of their own lobby.
         """
         lobby = self._lobbies.get(lobby_id)
-        if not lobby or not lobby.is_host(player_id):
-            return False
+        if not lobby:
+            return None
+
+        is_host = lobby.is_host(player_id)
+        is_creator = lobby.creator_player_id == player_id
+        if not (is_host or is_creator):
+            return None
 
         if lobby.status != LobbyStatus.FINISHED:
-            return False
+            return None
 
+        old_session_id = lobby.game_session_id
         lobby.status = LobbyStatus.WAITING
         lobby.game_session_id = None
         lobby.track = None
+
+        # Bring the host back to the creator on reset. The creator just
+        # asked to race again; if a stray host transfer (e.g. to a bot)
+        # had stuck, we'd otherwise drop them straight into 'Waiting for
+        # host to start race'.
+        if is_creator and lobby.host_player_id != lobby.creator_player_id:
+            if lobby.creator_player_id in lobby.members:
+                lobby.host_player_id = lobby.creator_player_id
 
         # Reset all members' ready status
         for member in lobby.members.values():
             if not member.is_bot:
                 member.ready = False
 
-        logger.info(f"Lobby {lobby_id} reset to WAITING")
-        return True
+        logger.info(f"Lobby {lobby_id} reset to WAITING by {player_id}")
+        return old_session_id
 
     def disband_lobby(self, lobby_id: str, player_id: str) -> bool:
         """

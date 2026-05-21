@@ -711,9 +711,12 @@ class TestLobbyManager:
         manager.start_race(lobby.lobby_id, "player1")
         manager.transition_to_racing(lobby.lobby_id)
         manager.finish_race(lobby.lobby_id)
+        expected_session_id = lobby.game_session_id
 
         result = manager.reset_lobby(lobby.lobby_id, "player1")
-        assert result is True
+        # reset_lobby now returns the dropped game_session_id so the
+        # caller can also clean up the orphaned engine in _game_sessions.
+        assert result == expected_session_id
 
         retrieved = manager.get_lobby(lobby.lobby_id)
         assert retrieved.status == LobbyStatus.WAITING
@@ -731,7 +734,39 @@ class TestLobbyManager:
         lobby.status = LobbyStatus.FINISHED
 
         result = manager.reset_lobby(lobby.lobby_id, "player2")
-        assert result is False
+        assert result is None
+
+    def test_reset_lobby_by_creator_when_host_is_bot(self, manager, monkeypatch):
+        """The creator can always reset their own lobby, even if a host
+        transfer earlier handed the host slot to a bot (same rule as
+        ``disband_lobby``). Without this, after racing solo with bots
+        the user can't get back into 'Race Again' on their own lobby.
+        """
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+
+        lobby = manager.create_lobby("Test Lobby", "alice")
+        manager.add_bot_to_lobby(
+            lobby_id=lobby.lobby_id,
+            bot_id=42,
+            kind="llm_bot",
+            bot_name="MyLLM",
+            owner_username="alice",
+            model_path="mlx-community/x",
+            system_prompt="p",
+        )
+        # Simulate the legacy bug: host got transferred to the bot.
+        bot_player_id = next(
+            m.player_id for m in lobby.members.values() if m.is_bot
+        )
+        lobby.host_player_id = bot_player_id
+        lobby.status = LobbyStatus.FINISHED
+
+        manager.reset_lobby(lobby.lobby_id, "alice")
+        # The lobby must be back to WAITING + host reclaimed by creator.
+        retrieved = manager.get_lobby(lobby.lobby_id)
+        assert retrieved.status == LobbyStatus.WAITING
+        assert retrieved.host_player_id == "alice"
 
     def test_reset_lobby_with_bots(self, manager):
         """Test that bots stay ready after reset."""

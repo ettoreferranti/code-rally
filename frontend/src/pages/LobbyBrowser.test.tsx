@@ -19,15 +19,19 @@ vi.mock('../hooks/useUsername', () => ({
 const mockDisbandLobby = vi.fn<(lobbyId: string, playerId: string) => Promise<void>>(
   async () => undefined,
 );
+const mockResetLobby = vi.fn<(lobbyId: string, playerId: string) => Promise<any>>(
+  async () => ({}),
+);
 
 vi.mock('../services', async () => {
-  // Stub fetch + create + disband. Each test sets `mockedLobbies`.
+  // Stub fetch + create + disband + reset. Each test sets `mockedLobbies`.
   return {
     fetchLobbies: vi.fn(async (status: string) => {
       return (globalThis as any).__mockedLobbies?.filter((l: any) => l.status === status) ?? [];
     }),
     createLobby: vi.fn(),
     disbandLobby: (lobbyId: string, playerId: string) => mockDisbandLobby(lobbyId, playerId),
+    resetLobby: (lobbyId: string, playerId: string) => mockResetLobby(lobbyId, playerId),
   };
 });
 
@@ -62,6 +66,7 @@ describe('LobbyBrowser — join existing lobby (#168)', () => {
   beforeEach(() => {
     (globalThis as any).__mockedLobbies = [];
     mockDisbandLobby.mockClear();
+    mockResetLobby.mockClear();
   });
 
   it('shows the creator name on every lobby card', async () => {
@@ -206,6 +211,69 @@ describe('LobbyBrowser — join existing lobby (#168)', () => {
     expect(confirmSpy).toHaveBeenCalled();
     expect(mockDisbandLobby).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
+  });
+
+  it('shows FINISHED lobbies in the list — without this, a lobby vanishes from the browser the moment its race ends', async () => {
+    setLobbies([
+      baseLobby({
+        host_player_id: 'alice',
+        creator_player_id: 'alice',
+        name: 'AlicesFinishedRace',
+        status: 'finished',
+      }),
+    ]);
+
+    renderBrowser();
+
+    await waitFor(() =>
+      expect(screen.getByText('AlicesFinishedRace')).toBeInTheDocument(),
+    );
+    // Status visibly reads "Finished" so the user can tell why there's no Join.
+    expect(screen.getByText('Finished')).toBeInTheDocument();
+  });
+
+  it('shows "Race Again" on the user\'s own FINISHED lobby and not on others\'', async () => {
+    setLobbies([
+      baseLobby({
+        lobby_id: 'mine',
+        host_player_id: 'alice',
+        creator_player_id: 'alice',
+        name: 'AlicesFinishedRace',
+        status: 'finished',
+      }),
+      baseLobby({
+        lobby_id: 'theirs',
+        host_player_id: 'bob',
+        creator_player_id: 'bob',
+        name: 'BobsFinishedRace',
+        status: 'finished',
+      }),
+    ]);
+
+    renderBrowser();
+
+    await waitFor(() => expect(screen.getByText('AlicesFinishedRace')).toBeInTheDocument());
+    expect(screen.getByTestId('race-again-mine')).toBeInTheDocument();
+    expect(screen.queryByTestId('race-again-theirs')).toBeNull();
+  });
+
+  it('clicking Race Again calls resetLobby and navigates into the lobby room', async () => {
+    setLobbies([
+      baseLobby({
+        lobby_id: 'mine',
+        host_player_id: 'alice',
+        creator_player_id: 'alice',
+        name: 'AlicesFinishedRace',
+        status: 'finished',
+      }),
+    ]);
+
+    renderBrowser();
+
+    await waitFor(() => expect(screen.getByTestId('race-again-mine')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('race-again-mine'));
+
+    expect(mockResetLobby).toHaveBeenCalledWith('mine', 'alice');
   });
 
   it('shows only Spectate for racing lobbies (no Join)', async () => {

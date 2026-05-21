@@ -228,6 +228,63 @@ class TestHandleLeaveLobbyDuringRace:
             game_route._game_sessions.pop("session-direct", None)
 
     @pytest.mark.asyncio
+    async def test_engine_finish_propagates_without_active_connections(self, monkeypatch):
+        """Regression: when the host leaves /race before the race wraps
+        up, the engine keeps ticking on the server and transitions to
+        FINISHED on its own — but `state_broadcaster` was gating the
+        propagation to the lobby behind `manager.active_connections`,
+        so the lobby was left pinned at RACING forever. Verify the
+        FINISHED transition fires even with zero active connections.
+        """
+        from app.api.routes import game as game_route
+        from app.core.engine import GameEngine, RaceStatus
+        from app.core.lobby import LobbyStatus
+        from app.core.track import TrackGenerator
+
+        captured = []
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            captured.append((lobby_id, message))
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        manager = get_lobby_manager()
+        lobby = manager.create_lobby("Race", "host_player")
+        lobby.status = LobbyStatus.RACING
+        lobby.game_session_id = "session-no-listeners"
+
+        track = TrackGenerator(seed=42).generate(difficulty="easy")
+        engine = GameEngine(track)
+        engine.state.race_info.status = RaceStatus.FINISHED
+
+        game_route._game_sessions["session-no-listeners"] = engine
+        game_route._lobby_sessions.add("session-no-listeners")
+        # Crucially: NO entry in manager.active_connections for this
+        # session — simulates the host having left the race screen.
+        try:
+            transitioned = await game_route._propagate_engine_finish_to_lobby(
+                "session-no-listeners"
+            )
+            assert transitioned is True
+            assert lobby.status == LobbyStatus.FINISHED
+            # Lobby_state broadcast went out to the (now-empty) lobby.
+            assert any(
+                lid == lobby.lobby_id and m["type"] == "lobby_state"
+                for (lid, m) in captured
+            )
+
+            # Idempotent on second call.
+            captured.clear()
+            transitioned2 = await game_route._propagate_engine_finish_to_lobby(
+                "session-no-listeners"
+            )
+            assert transitioned2 is False
+            assert captured == []
+        finally:
+            game_route._game_sessions.pop("session-no-listeners", None)
+            game_route._lobby_sessions.discard("session-no-listeners")
+
+    @pytest.mark.asyncio
     async def test_disconnect_with_missing_lobby_does_not_raise(self, monkeypatch):
         """Defensive: a stale lobby_id (already disbanded) must not crash
         the disconnect handler.
@@ -571,6 +628,104 @@ class TestDisbandLobby:
         response = client.delete("/lobbies/invalid-id?player_id=player1")
 
         assert response.status_code == 404
+
+
+class TestResetLobby:
+    """Test POST /lobbies/{lobby_id}/reset endpoint (powers 'Race Again')."""
+
+    def test_reset_finished_lobby_by_host(self, client):
+        """A FINISHED lobby resets back to WAITING and the dropped engine
+        session is removed from in-memory bookkeeping.
+        """
+        from app.api.routes import game as game_route
+        from app.core.engine import GameEngine
+        from app.core.lobby import LobbyStatus
+        from app.core.track import TrackGenerator
+
+        create = client.post(
+            "/lobbies",
+            json={"name": "L", "host_player_id": "player1"},
+        )
+        lobby_id = create.json()["lobby_id"]
+
+        # Put the lobby in FINISHED with a dangling engine session, the
+        # state the lobby ends up in after a race wraps up.
+        manager = get_lobby_manager()
+        lobby = manager.get_lobby(lobby_id)
+        lobby.status = LobbyStatus.FINISHED
+        lobby.game_session_id = "old-session"
+        track = TrackGenerator(seed=1).generate(difficulty="easy")
+        game_route._game_sessions["old-session"] = GameEngine(track)
+        game_route._lobby_sessions.add("old-session")
+
+        try:
+            response = client.post(
+                f"/lobbies/{lobby_id}/reset?player_id=player1",
+            )
+            assert response.status_code == 200
+            assert response.json()["status"] == "waiting"
+            assert response.json()["game_session_id"] is None
+            # Orphaned engine cleaned up so it doesn't pile up.
+            assert "old-session" not in game_route._game_sessions
+            assert "old-session" not in game_route._lobby_sessions
+        finally:
+            game_route._game_sessions.pop("old-session", None)
+            game_route._lobby_sessions.discard("old-session")
+
+    def test_reset_lobby_by_non_host_returns_403(self, client):
+        from app.core.lobby import LobbyStatus
+        create = client.post(
+            "/lobbies",
+            json={"name": "L", "host_player_id": "player1"},
+        )
+        lobby_id = create.json()["lobby_id"]
+        manager = get_lobby_manager()
+        manager.get_lobby(lobby_id).status = LobbyStatus.FINISHED
+
+        response = client.post(
+            f"/lobbies/{lobby_id}/reset?player_id=stranger",
+        )
+        assert response.status_code == 403
+
+    def test_reset_non_finished_lobby_returns_400(self, client):
+        create = client.post(
+            "/lobbies",
+            json={"name": "L", "host_player_id": "player1"},
+        )
+        lobby_id = create.json()["lobby_id"]
+        # Lobby is still WAITING — can't reset.
+        response = client.post(
+            f"/lobbies/{lobby_id}/reset?player_id=player1",
+        )
+        assert response.status_code == 400
+
+    def test_reset_missing_lobby_returns_404(self, client):
+        response = client.post(
+            "/lobbies/does-not-exist/reset?player_id=player1",
+        )
+        assert response.status_code == 404
+
+
+class TestListLobbiesIncludesFinished:
+    """The lobby browser also fetches FINISHED lobbies so the host can
+    'Race Again' on a lobby they previously raced in.
+    """
+
+    def test_status_finished_filter_returns_finished_lobbies(self, client):
+        from app.core.lobby import LobbyStatus
+        create = client.post(
+            "/lobbies",
+            json={"name": "L", "host_player_id": "player1"},
+        )
+        lobby_id = create.json()["lobby_id"]
+        get_lobby_manager().get_lobby(lobby_id).status = LobbyStatus.FINISHED
+
+        response = client.get("/lobbies?status=finished")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["lobby_id"] == lobby_id
+        assert data[0]["status"] == "finished"
 
 
 class TestEndToEndWorkflow:

@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchLobbies, createLobby, disbandLobby, type LobbyListItem } from '../services';
+import { fetchLobbies, createLobby, disbandLobby, resetLobby, type LobbyListItem } from '../services';
 import { useUsername } from '../hooks/useUsername';
 
 const LobbyBrowser: React.FC = () => {
@@ -32,12 +32,17 @@ const LobbyBrowser: React.FC = () => {
 
   const loadLobbies = async () => {
     try {
-      // Show waiting (joinable) and racing (spectatable) lobbies
-      const [waiting, racing] = await Promise.all([
+      // Show waiting (joinable), racing (spectatable), and finished
+      // (resettable via "Race Again"). Without `finished`, a lobby the
+      // user just raced in vanishes from the browser the moment the
+      // race wraps up — even though they own it and might want to
+      // race the same field of bots again.
+      const [waiting, racing, finished] = await Promise.all([
         fetchLobbies('waiting'),
         fetchLobbies('racing'),
+        fetchLobbies('finished'),
       ]);
-      setLobbies([...waiting, ...racing]);
+      setLobbies([...waiting, ...racing, ...finished]);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load lobbies');
@@ -97,6 +102,17 @@ const LobbyBrowser: React.FC = () => {
       await loadLobbies();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete lobby');
+    }
+  };
+
+  const handleRaceAgain = async (lobby: LobbyListItem) => {
+    if (!username) return;
+    setError(null);
+    try {
+      await resetLobby(lobby.lobby_id, username);
+      navigate(`/lobby/${lobby.lobby_id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset lobby');
     }
   };
 
@@ -195,8 +211,20 @@ const LobbyBrowser: React.FC = () => {
                     </p>
                     <p className="text-sm">
                       Status:{' '}
-                      <span className={lobby.status === 'racing' ? 'text-green-400 font-semibold' : ''}>
-                        {lobby.status === 'racing' ? 'In Race' : lobby.status}
+                      <span
+                        className={
+                          lobby.status === 'racing'
+                            ? 'text-green-400 font-semibold'
+                            : lobby.status === 'finished'
+                            ? 'text-gray-400 font-semibold'
+                            : ''
+                        }
+                      >
+                        {lobby.status === 'racing'
+                          ? 'In Race'
+                          : lobby.status === 'finished'
+                          ? 'Finished'
+                          : lobby.status}
                       </span>
                     </p>
                     {lobby.spectator_count > 0 && (
@@ -221,12 +249,23 @@ const LobbyBrowser: React.FC = () => {
                         {isOwnLobby ? 'Resume' : isFull ? 'Full' : 'Join'}
                       </button>
                     )}
-                    <button
-                      onClick={() => handleSpectateLobby(lobby)}
-                      className={`${lobby.status === 'racing' ? 'flex-1' : ''} py-2 px-4 rounded font-semibold bg-purple-600 hover:bg-purple-500`}
-                    >
-                      Spectate
-                    </button>
+                    {lobby.status === 'finished' && isOwnLobby && (
+                      <button
+                        data-testid={`race-again-${lobby.lobby_id}`}
+                        onClick={() => handleRaceAgain(lobby)}
+                        className="flex-1 py-2 rounded font-semibold bg-green-600 hover:bg-green-500"
+                      >
+                        Race Again
+                      </button>
+                    )}
+                    {lobby.status !== 'finished' && (
+                      <button
+                        onClick={() => handleSpectateLobby(lobby)}
+                        className={`${lobby.status === 'racing' ? 'flex-1' : ''} py-2 px-4 rounded font-semibold bg-purple-600 hover:bg-purple-500`}
+                      >
+                        Spectate
+                      </button>
+                    )}
                     {isOwnLobby && (
                       <button
                         data-testid={`delete-lobby-${lobby.lobby_id}`}

@@ -324,6 +324,57 @@ async def update_lobby_settings(
     return _lobby_to_response(updated_lobby)
 
 
+@router.post("/{lobby_id}/reset", response_model=LobbyResponse)
+async def reset_lobby(
+    lobby_id: str,
+    player_id: str = Query(..., description="Player ID attempting reset (host or creator)")
+):
+    """Reset a FINISHED lobby back to WAITING so the host can race again.
+
+    Powers the 'Race Again' button on /lobbies. Also cleans up the
+    orphaned engine + broadcaster from the previous race so they don't
+    pile up in memory across re-races.
+    """
+    manager = get_lobby_manager()
+    lobby = manager.get_lobby(lobby_id)
+    if not lobby:
+        raise HTTPException(status_code=404, detail=f"Lobby {lobby_id} not found")
+
+    if lobby.status != LobbyStatus.FINISHED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only reset a FINISHED lobby (current status: {lobby.status.value})",
+        )
+
+    old_session_id = manager.reset_lobby(lobby_id, player_id)
+    if old_session_id is None and lobby.status != LobbyStatus.WAITING:
+        # Reset was refused. Could be auth or status; status was checked
+        # above so the only remaining cause is not-host-or-creator.
+        raise HTTPException(
+            status_code=403,
+            detail="Only the lobby's host or creator can reset it",
+        )
+
+    # Clean up the orphaned engine from the previous race so it doesn't
+    # keep ticking + broadcasting in the background after the reset.
+    if old_session_id:
+        from app.api.routes import game as game_route
+        engine = game_route._game_sessions.pop(old_session_id, None)
+        game_route._lobby_sessions.discard(old_session_id)
+        game_route._spectator_connections.pop(old_session_id, None)
+        if engine is not None:
+            try:
+                await engine.stop_loop()
+            except Exception:
+                logger.exception(
+                    "Failed to stop orphaned engine for session %s",
+                    old_session_id,
+                )
+
+    updated_lobby = manager.get_lobby(lobby_id)
+    return _lobby_to_response(updated_lobby)
+
+
 @router.delete("/{lobby_id}", status_code=204)
 async def disband_lobby(
     lobby_id: str,
