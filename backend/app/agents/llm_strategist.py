@@ -206,11 +206,20 @@ class LLMStrategist:
         if intent is not None:
             self._latest_intent = intent
             self._latest_intent_ts = time.time()
+            target_suffix = (
+                f", target_opp=#{intent.target_opponent_index}"
+                if intent.target_opponent_index is not None
+                else ""
+            )
             logger.info(
-                "strategist intent: target=%.0f km/h, offset=%+.1f m, aggression=%.2f",
+                "strategist intent: target=%.0f km/h, offset=%+.1f m, "
+                "aggression=%.2f, nitro=%s, tactic=%s%s",
                 intent.target_speed_kmh,
                 intent.racing_line_offset_m,
                 intent.aggression,
+                "Y" if intent.use_nitro else "N",
+                intent.tactic,
+                target_suffix,
             )
         else:
             # Surface parse failures too — useful when the model emits malformed

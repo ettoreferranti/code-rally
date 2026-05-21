@@ -22,6 +22,14 @@ from app.agents.llm_bot import LLMBot
 from app.agents.llm_strategist import GenerateFn
 
 
+# Per-bot timeout for the synchronous warmup generate triggered from
+# ``start_agents``. Slightly under the engine countdown (3s default) so
+# even N=2 LLM bots sharing the single MLX executor still finish before
+# green light in the common case. A miss logs a warning and falls back
+# to the background loop producing an intent slightly after RACING starts.
+_WARMUP_TIMEOUT_S = 2.5
+
+
 class RaceStatus(Enum):
     """Current status of the race."""
     WAITING = "waiting"  # Waiting for players
@@ -254,14 +262,69 @@ class GameEngine:
         return player
 
     async def start_agents(self) -> None:
-        """Spawn background tasks for all LLM-driven players.
+        """Warm up and spawn background tasks for all LLM-driven players.
 
-        Call after start_race(). Safe to call multiple times; LLMStrategist
-        guards against double-start.
+        Called after ``start_race()`` (which transitions to ``COUNTDOWN``).
+        Safe to call multiple times; ``LLMStrategist`` guards against
+        double-start.
+
+        Warm-up sequence (eliminates the cold-start handicap LLM drivers
+        used to pay at race start — see issue conversation):
+
+        1. Build the start-position ``BotGameState`` for each LLM bot and
+           pre-feed it to the strategist (``warmup_from_state``). Without
+           this, the strategist's first 1–3 background ticks during
+           countdown all see ``observation=None`` and return ``None``.
+        2. Run one synchronous ``warmup_tick`` per bot. This forces the
+           first (expensive) MLX generate to happen DURING countdown so a
+           valid Intent is cached before green light. The shared MLX
+           executor serialises these calls; with N LLM bots and a 3-second
+           countdown, N=1–2 fits comfortably.
+        3. Spawn the regular background loops.
+
+        A per-bot timeout protects the race from a hanging model: if the
+        first generate exceeds ``_WARMUP_TIMEOUT_S`` we log a warning and
+        continue — the background loop will produce an intent later
+        instead, and the controller falls back to its safe cruise meanwhile.
         """
-        for player in self.state.players.values():
-            if player.llm_bot is not None:
-                await player.llm_bot.start()
+        llm_players = [
+            p for p in self.state.players.values() if p.llm_bot is not None
+        ]
+
+        # Pre-feed observations.
+        for player in llm_players:
+            bot_state = self.bot_manager._create_bot_game_state(
+                self.state, player.player_id, self.state.track
+            )
+            player.llm_bot.warmup_from_state(bot_state)
+
+        # Synchronous first generate per bot (during countdown).
+        for player in llm_players:
+            try:
+                await asyncio.wait_for(
+                    player.llm_bot.warmup_tick(),
+                    timeout=_WARMUP_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "LLM warmup tick for %s timed out after %.1fs; "
+                    "first intent will arrive after race start",
+                    player.player_id,
+                    _WARMUP_TIMEOUT_S,
+                )
+            except Exception:
+                # warmup_tick is built on tick_once which already swallows
+                # generator exceptions, but defend the start-agents path
+                # anyway — a misbehaving model must not block the race.
+                logger.exception(
+                    "LLM warmup tick for %s raised unexpectedly",
+                    player.player_id,
+                )
+
+        # Spawn the regular background loops.
+        for player in llm_players:
+            await player.llm_bot.start()
+
         # Reset the auto-stop guard so the next race-finish will trigger
         # the agent-stop transition.
         self._agents_stopped = False
@@ -1180,7 +1243,9 @@ class GameEngine:
 
         # agent_intent is only present for LLM-driven cars that have produced
         # at least one intent. Frontend conditionally renders the thought
-        # bubble on its presence.
+        # bubble on its presence. All six Intent fields ride here so the
+        # bubble can show the LLM's full reasoning (nitro use, tactical
+        # targeting), not just speed + aggression.
         if player.llm_bot is not None:
             intent, ts = player.llm_bot.latest_intent_with_ts()
             if intent is not None and ts is not None:
@@ -1188,6 +1253,9 @@ class GameEngine:
                     'target_speed_kmh': intent.target_speed_kmh,
                     'racing_line_offset_m': intent.racing_line_offset_m,
                     'aggression': intent.aggression,
+                    'use_nitro': intent.use_nitro,
+                    'target_opponent_index': intent.target_opponent_index,
+                    'tactic': intent.tactic,
                     'ts': ts,
                 }
 

@@ -63,10 +63,17 @@ export interface Track {
   obstacles: Obstacle[];  // Off-road obstacles
 }
 
+export type AgentTactic = 'race' | 'overtake' | 'block' | 'pit';
+
 export interface AgentIntent {
   target_speed_kmh: number;
   racing_line_offset_m: number;
   aggression: number;  // 0..1
+  // Optional fields added with the LLM driving uplift. Older recordings
+  // and legacy backends will simply omit these.
+  use_nitro?: boolean;
+  target_opponent_index?: number | null;  // 0 = nearest, 1 = second-nearest, null = none
+  tactic?: AgentTactic;
   ts: number;  // Server Unix epoch seconds when the intent was produced
 }
 

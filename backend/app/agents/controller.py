@@ -174,9 +174,17 @@ class Controller:
             return
         current_kmh = state.car.speed * _UNITS_TO_KMH
         steer = "L" if inputs.turn_left else ("R" if inputs.turn_right else "-")
+        tactic_suffix = ""
+        if self._last_intent is not None and self._last_intent.tactic != "race":
+            target_str = (
+                f"#{self._last_intent.target_opponent_index}"
+                if self._last_intent.target_opponent_index is not None
+                else "-"
+            )
+            tactic_suffix = f" | tactic={self._last_intent.tactic} target={target_str}"
         logger.debug(
             "controller@(%6.1f,%6.1f) heading=%+5.1f deg | target=%5.1f curr=%5.1f delta=%+6.1f km/h "
-            "| offset=%+4.1f m agg=%.2f | accel=%d brake=%d steer=%s | surface=%s off_track=%s%s",
+            "| offset=%+4.1f m agg=%.2f | accel=%d brake=%d steer=%s nitro=%d | surface=%s off_track=%s%s%s",
             state.car.position[0],
             state.car.position[1],
             math.degrees(state.car.heading),
@@ -188,8 +196,10 @@ class Controller:
             int(inputs.accelerate),
             int(inputs.brake),
             steer,
+            int(inputs.nitro),
             state.car.current_surface,
             "Y" if state.car.off_track else "N",
+            tactic_suffix,
             " [fallback]" if fallback else "",
         )
 

@@ -443,6 +443,42 @@ The `Controller` (`backend/app/agents/controller.py`) consumes these:
   verbatim. When a tactic references a missing opponent, the
   resolver falls through to the LLM's offset rather than crashing.
 
+### LLM cold-start warmup
+
+`engine.start_agents` (called once after `start_race` triggers
+COUNTDOWN) now warms each LLM bot up BEFORE spawning the background
+strategist task:
+
+1. Build the start-position `BotGameState` for each LLM bot and
+   pre-feed it via `LLMBot.warmup_from_state(state)`. Without this
+   the strategist's first 1–3 ticks during countdown all see
+   `observation=None` and return `None`.
+2. Run one synchronous `LLMBot.warmup_tick()` per LLM bot. The
+   shared MLX executor serialises these so they run sequentially;
+   per-bot timeout is `engine._WARMUP_TIMEOUT_S` (2.5 s default).
+3. Spawn the regular background loops.
+
+End result: by green light, each LLM driver has a valid Intent
+cached, so the controller starts on the LLM's plan rather than the
+30 km/h fallback cruise. This closes the historical 1–2 s gap
+between LLM cars and humans/Python bots at race start.
+
+### Thought bubble (visibility)
+
+`engine._player_snapshot` ships all six Intent fields under
+`agent_intent` (was three pre-uplift). `AgentThoughtBubble.tsx`
+renders:
+
+- speed (km/h) + nitro ⚡ on the top line when `use_nitro=true`,
+- aggression word (cautious/steady/aggressive),
+- racing-line arrow + magnitude when offset is outside ±0.5 m
+  (`offset_label`),
+- tactic label with target slot (`#1` / `#2`) when `tactic != "race"`.
+
+`gameWebSocket.ts::agent_intent` and `types.ts::AgentIntent` mirror
+the backend shape. The three new fields are typed as optional for
+forward compatibility (older recordings or older backends omit them).
+
 ## Testing Requirements
 
 ### Backend Tests (~430 tests)

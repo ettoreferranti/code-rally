@@ -161,6 +161,114 @@ class TestLLMBotWiring:
         assert ctrl.accelerate is True
 
 
+class TestLLMBotWarmup:
+    """The engine warms up LLM bots during countdown so the first MLX
+    generate happens BEFORE green light (no cold-start handicap)."""
+
+    def test_warmup_from_state_seeds_observation(self):
+        bot = LLMBot(generate_fn=_make_constant_generate())
+        # Before warmup, the strategist has no observation.
+        assert bot._strategist._latest_observation is None
+
+        bot.warmup_from_state(_make_bot_state(checkpoints=[(100.0, 0.0)]))
+        observation = bot._strategist._latest_observation
+        assert observation is not None
+        # The seeded observation must be a valid formatted observation
+        # (same as what get_inputs would push).
+        assert "speed:" in observation
+        assert "checkpoint" in observation
+
+    @pytest.mark.asyncio
+    async def test_warmup_tick_produces_intent_when_observation_set(self):
+        bot = LLMBot(generate_fn=_make_constant_generate())
+        bot.warmup_from_state(_make_bot_state(checkpoints=[(100.0, 0.0)]))
+
+        # Before warmup_tick: no intent yet (strategist hasn't generated).
+        assert bot._strategist._latest_intent is None
+
+        await bot.warmup_tick()
+
+        # After warmup_tick: an intent is cached. The race-time controller
+        # picks it up on the first RACING tick instead of falling back.
+        intent = bot._strategist._latest_intent
+        assert intent is not None
+        assert intent.target_speed_kmh == 80.0  # from VALID_INTENT_JSON
+
+    @pytest.mark.asyncio
+    async def test_warmup_tick_without_observation_is_a_noop(self):
+        # Per the LLMBot docstring: warmup_tick is safe to call without
+        # a prior warmup_from_state (returns cleanly, no exception).
+        bot = LLMBot(generate_fn=_make_constant_generate())
+        await bot.warmup_tick()
+        assert bot._strategist._latest_intent is None
+
+    @pytest.mark.asyncio
+    async def test_start_agents_seeds_observation_for_each_llm_bot(self, engine):
+        """start_agents must pre-feed each LLM bot's strategist with the
+        start-position observation. Without this, the strategist sees
+        observation=None throughout the countdown.
+        """
+        engine.add_llm_player("llm_player", generate_fn=_make_constant_generate(),
+                              strategist_kwargs={"tick_interval_s": 0.01})
+        player = engine.state.players["llm_player"]
+        # Before start_agents: strategist still has no observation.
+        assert player.llm_bot._strategist._latest_observation is None
+
+        await engine.start_agents()
+
+        # After start_agents: observation has been seeded.
+        assert player.llm_bot._strategist._latest_observation is not None
+        assert "speed:" in player.llm_bot._strategist._latest_observation
+
+        await engine.stop_loop()
+
+    @pytest.mark.asyncio
+    async def test_start_agents_runs_warmup_tick_producing_first_intent(self, engine):
+        """The synchronous warmup_tick must produce an Intent before
+        start_agents returns, so the controller has a valid Intent on
+        the very first RACING tick.
+        """
+        engine.add_llm_player("llm_player", generate_fn=_make_constant_generate(),
+                              strategist_kwargs={"tick_interval_s": 0.01})
+        player = engine.state.players["llm_player"]
+
+        await engine.start_agents()
+
+        intent = player.llm_bot._strategist._latest_intent
+        assert intent is not None
+        assert intent.target_speed_kmh == 80.0
+
+        await engine.stop_loop()
+
+    @pytest.mark.asyncio
+    async def test_start_agents_warmup_tolerates_slow_generate(self, engine):
+        """If a generate hangs past the warmup timeout, start_agents must
+        log and continue rather than blocking the race start.
+        """
+        slow_event = asyncio.Event()
+
+        async def slow_generate(_prompt: str) -> str:
+            try:
+                await asyncio.wait_for(slow_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                pass
+            return VALID_INTENT_JSON
+
+        engine.add_llm_player("llm_player", generate_fn=slow_generate,
+                              strategist_kwargs={"tick_interval_s": 0.5})
+
+        # Override the engine's warmup timeout so the test stays fast.
+        from app.core import engine as engine_module
+        original_timeout = engine_module._WARMUP_TIMEOUT_S
+        engine_module._WARMUP_TIMEOUT_S = 0.1
+        try:
+            await engine.start_agents()  # must NOT hang
+        finally:
+            engine_module._WARMUP_TIMEOUT_S = original_timeout
+            slow_event.set()
+            await engine.stop_loop()
+
+
 # ===== Per-tick path must not block on the LLM =====
 
 
@@ -437,6 +545,33 @@ class TestEngineLLMIntegration:
         assert agent_intent["racing_line_offset_m"] == 1.5
         assert agent_intent["aggression"] == 0.4
         assert agent_intent["ts"] == produced_at
+        # New tactical fields default to non-targeting when the LLM emits
+        # a legacy 3-field JSON. They MUST still be present in the snapshot
+        # so the frontend bubble can render them.
+        assert agent_intent["use_nitro"] is False
+        assert agent_intent["target_opponent_index"] is None
+        assert agent_intent["tactic"] == "race"
+
+    def test_snapshot_exposes_tactical_intent_fields(self, engine):
+        """When the LLM emits the new tactical fields, the snapshot ships them all."""
+        import time as _time
+
+        engine.add_llm_player("llm_player", generate_fn=_make_constant_generate())
+        player = engine.state.players["llm_player"]
+        player.llm_bot._strategist._latest_intent = Intent(
+            target_speed_kmh=160.0,
+            racing_line_offset_m=-5.0,
+            aggression=0.9,
+            use_nitro=True,
+            target_opponent_index=0,
+            tactic="overtake",
+        )
+        player.llm_bot._strategist._latest_intent_ts = _time.time()
+
+        agent_intent = engine.get_state_snapshot()["players"]["llm_player"]["agent_intent"]
+        assert agent_intent["use_nitro"] is True
+        assert agent_intent["target_opponent_index"] == 0
+        assert agent_intent["tactic"] == "overtake"
 
     def test_add_llm_player_propagates_model_path_to_runtime(self, engine, monkeypatch):
         """The model_path argument routes through to get_mlx_generate_fn."""

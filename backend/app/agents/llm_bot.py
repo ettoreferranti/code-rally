@@ -62,6 +62,33 @@ class LLMBot:
         """Cancel the background strategist task and wait for it to exit."""
         await self._strategist.stop()
 
+    def warmup_from_state(self, state: BotGameState) -> None:
+        """Pre-feed the strategist with an observation built from ``state``.
+
+        Called by the engine before the race transitions to RACING. The
+        engine's ``_update_bot_inputs`` is gated on ``RaceStatus.RACING``,
+        so without this hook the strategist's first ~3 background ticks
+        during countdown would all see ``observation = None`` and return
+        ``None``. Pre-feeding the start-position observation gives the
+        background loop something to chew on immediately.
+        """
+        self._strategist.set_observation(format_observation(state))
+
+    async def warmup_tick(self) -> None:
+        """Run one strategist ``tick_once`` synchronously.
+
+        Used at race start so the first (expensive) MLX generate happens
+        during the countdown rather than after green light. Calling this
+        before ``start()`` ensures the background loop already has a
+        valid Intent cached and the controller doesn't fall back to its
+        slow cruise on the first racing tick.
+
+        Safe to call without a prior ``warmup_from_state``; the underlying
+        ``tick_once`` returns ``None`` cleanly when no observation has been
+        set.
+        """
+        await self._strategist.tick_once()
+
     def get_inputs(self, state: BotGameState) -> ControlInputs:
         """Compute the next-tick control flags. Never raises, never awaits."""
         self._strategist.set_observation(format_observation(state))

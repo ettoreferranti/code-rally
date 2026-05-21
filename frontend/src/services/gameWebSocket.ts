@@ -51,6 +51,11 @@ export interface GameStateMessage {
           target_speed_kmh: number;
           racing_line_offset_m: number;
           aggression: number;
+          // New tactical fields added with the driving uplift. Optional
+          // for forward compatibility with older backends.
+          use_nitro?: boolean;
+          target_opponent_index?: number | null;
+          tactic?: 'race' | 'overtake' | 'block' | 'pit';
           ts: number;
         };
       };
