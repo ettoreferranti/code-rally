@@ -138,6 +138,12 @@ class LLMStrategist:
             without loading a real model.
         tick_interval_s: how often the background loop calls generate_fn.
         timeout_s: per-call timeout. Timeouts are dropped, not raised.
+            Default 15.0s — generous enough to cover the common 1.5B–7B
+            MLX models (7B-Q4 first calls can take 3–5 s on M4 Pro). The
+            engine's ``add_llm_player`` plumbs a model-size-aware override
+            in via ``estimate_timeout_for_model``. A previous 2.0 s default
+            silently broke 7B+ models because every tick timed out before
+            the generate could finish.
         system_prompt: optional per-bot driving-strategy text. None →
             use ``DEFAULT_STRATEGY_PROMPT``. Set by the Tinker UI when
             the LLM bot stored its own strategy. The I/O protocol is
@@ -148,7 +154,7 @@ class LLMStrategist:
         self,
         generate_fn: GenerateFn,
         tick_interval_s: float = 1.0,
-        timeout_s: float = 2.0,
+        timeout_s: float = 15.0,
         system_prompt: Optional[str] = None,
     ) -> None:
         self._generate_fn = generate_fn

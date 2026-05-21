@@ -185,3 +185,81 @@ async def test_generate_serializes_concurrent_calls(monkeypatch):
         "MLXRuntime.generate must serialize concurrent callers — Metal "
         "rejects two simultaneous encodings against the same model."
     )
+
+
+# ===== Model-aware timeout heuristic =====
+
+
+class TestEstimateTimeoutForModel:
+    """The heuristic that picks a per-tick generate timeout based on the
+    MLX model path. A 2 s timeout (the old default) silently broke 7B+
+    models because every tick timed out before the model could answer.
+    """
+
+    def test_default_when_path_is_none(self):
+        assert mlx_runtime.estimate_timeout_for_model(None) == 15.0
+
+    def test_default_when_path_has_no_size_hint(self):
+        assert (
+            mlx_runtime.estimate_timeout_for_model(
+                "mlx-community/Some-Mystery-Model"
+            )
+            == 15.0
+        )
+
+    def test_small_model_gets_short_timeout(self):
+        assert (
+            mlx_runtime.estimate_timeout_for_model(
+                "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
+            )
+            == 5.0
+        )
+
+    def test_three_b_model_gets_medium_timeout(self):
+        assert (
+            mlx_runtime.estimate_timeout_for_model(
+                "mlx-community/Qwen2.5-3B-Instruct-4bit"
+            )
+            == 10.0
+        )
+
+    def test_seven_b_model_gets_generous_timeout(self):
+        # 7B Q4 first call can take 3-5s on M4 Pro; we want headroom.
+        assert (
+            mlx_runtime.estimate_timeout_for_model(
+                "mlx-community/Qwen2.5-7B-Instruct-4bit"
+            )
+            == 20.0
+        )
+
+    def test_eight_b_model_treated_as_seven_b_class(self):
+        # Llama 3.1 8B etc.
+        assert (
+            mlx_runtime.estimate_timeout_for_model(
+                "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+            )
+            == 20.0
+        )
+
+    def test_big_model_gets_long_timeout(self):
+        assert (
+            mlx_runtime.estimate_timeout_for_model(
+                "mlx-community/Qwen2.5-32B-Instruct-4bit"
+            )
+            == 60.0
+        )
+
+    def test_substring_order_picks_32b_over_3b(self):
+        # Order in the lookup table matters: "32b" must match before "3b"
+        # otherwise the bigger model would get the wrong (too-short) budget.
+        # This is a regression guard for the lookup-table ordering.
+        assert (
+            mlx_runtime.estimate_timeout_for_model("mlx-community/Foo-32B")
+            == 60.0
+        )
+
+    def test_case_insensitive(self):
+        assert (
+            mlx_runtime.estimate_timeout_for_model("mlx-community/qwen2.5-7b-q4")
+            == 20.0
+        )

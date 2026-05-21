@@ -554,13 +554,15 @@ add-bot dispatch.
 
 **Cold-start warmup.** The strategist needs an observation to
 produce an intent, and the engine only feeds observations during
-`RaceStatus.RACING`. To avoid the LLM driver starting from a
-30 km/h fallback cruise while the others go full throttle,
-`engine.start_agents` pre-feeds each LLM bot's strategist with the
-start-position observation AND runs one synchronous warmup
-generate during countdown. By green light, an Intent is already
-cached, so the LLM driver hits the throttle on tick 0 just like
-everyone else.
+`RaceStatus.RACING`. `engine.start_agents` seeds the strategist
+with the start-position observation, then spawns the background
+loop — whose first tick fires immediately and serves as the
+warmup naturally. For fast models (1.5B–3B Q4) the first generate
+lands inside the 3 s countdown; for 7B+ the controller cruises
+in fallback for a moment after green light and then snaps to LLM
+control. The strategist's per-tick timeout scales with model size
+(`mlx_runtime.estimate_timeout_for_model`): 5 s for 1.5B, 10 s
+for 3B, 20 s for 7B/8B, 30 s for 13B, 60 s for 32B+.
 
 The observation the strategist receives is a fixed-shape text block
 with terrain-aware fields: real `edge_left`/`edge_right` boundary

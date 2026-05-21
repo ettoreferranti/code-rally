@@ -22,14 +22,6 @@ from app.agents.llm_bot import LLMBot
 from app.agents.llm_strategist import GenerateFn
 
 
-# Per-bot timeout for the synchronous warmup generate triggered from
-# ``start_agents``. Slightly under the engine countdown (3s default) so
-# even N=2 LLM bots sharing the single MLX executor still finish before
-# green light in the common case. A miss logs a warning and falls back
-# to the background loop producing an intent slightly after RACING starts.
-_WARMUP_TIMEOUT_S = 2.5
-
-
 class RaceStatus(Enum):
     """Current status of the race."""
     WAITING = "waiting"  # Waiting for players
@@ -246,6 +238,18 @@ class GameEngine:
             try:
                 from app.agents import mlx_runtime
                 generate_fn = mlx_runtime.get_mlx_generate_fn(model_path)
+                # Plumb a model-size-aware tick timeout unless the caller
+                # already supplied one. The original 2 s strategist default
+                # silently broke 7B+ models — every tick timed out before
+                # the model could answer, so no Intent was ever stored and
+                # the controller stayed in 30 km/h fallback for the entire
+                # race. estimate_timeout_for_model scales by model size.
+                effective_kwargs = dict(strategist_kwargs or {})
+                effective_kwargs.setdefault(
+                    "timeout_s",
+                    mlx_runtime.estimate_timeout_for_model(model_path),
+                )
+                strategist_kwargs = effective_kwargs
             except RuntimeError as exc:
                 player.is_bot = True
                 player.bot_error = str(exc)
@@ -262,66 +266,45 @@ class GameEngine:
         return player
 
     async def start_agents(self) -> None:
-        """Warm up and spawn background tasks for all LLM-driven players.
+        """Spawn background tasks for all LLM-driven players.
 
         Called after ``start_race()`` (which transitions to ``COUNTDOWN``).
         Safe to call multiple times; ``LLMStrategist`` guards against
         double-start.
 
-        Warm-up sequence (eliminates the cold-start handicap LLM drivers
-        used to pay at race start — see issue conversation):
+        Each LLM bot is given a starting observation via
+        ``warmup_from_state`` so its background loop's very first tick has
+        something to chew on (otherwise the first 1–3 strategist ticks
+        during countdown see ``observation=None`` and return ``None``,
+        wasting most of the countdown window).
 
-        1. Build the start-position ``BotGameState`` for each LLM bot and
-           pre-feed it to the strategist (``warmup_from_state``). Without
-           this, the strategist's first 1–3 background ticks during
-           countdown all see ``observation=None`` and return ``None``.
-        2. Run one synchronous ``warmup_tick`` per bot. This forces the
-           first (expensive) MLX generate to happen DURING countdown so a
-           valid Intent is cached before green light. The shared MLX
-           executor serialises these calls; with N LLM bots and a 3-second
-           countdown, N=1–2 fits comfortably.
-        3. Spawn the regular background loops.
-
-        A per-bot timeout protects the race from a hanging model: if the
-        first generate exceeds ``_WARMUP_TIMEOUT_S`` we log a warning and
-        continue — the background loop will produce an intent later
-        instead, and the controller falls back to its safe cruise meanwhile.
+        We DO NOT block here on a synchronous warmup generate. A previous
+        version did, intending to "guarantee an intent before green light",
+        but that backfired with slow models on the shared MLX executor:
+        a 7B-Q4 generate blew past the warmup timeout, leaked the call
+        into the executor queue, and starved every other bot behind it.
+        The background loop's first tick now serves as the warmup
+        naturally — fast models complete it during the 3 s countdown,
+        slow models pay a brief fallback window after green light and
+        then snap to LLM control on their first successful tick.
         """
         llm_players = [
             p for p in self.state.players.values() if p.llm_bot is not None
         ]
 
-        # Pre-feed observations.
+        # Seed initial observations so the first background tick produces
+        # an intent on its first try.
         for player in llm_players:
             bot_state = self.bot_manager._create_bot_game_state(
                 self.state, player.player_id, self.state.track
             )
             player.llm_bot.warmup_from_state(bot_state)
 
-        # Synchronous first generate per bot (during countdown).
-        for player in llm_players:
-            try:
-                await asyncio.wait_for(
-                    player.llm_bot.warmup_tick(),
-                    timeout=_WARMUP_TIMEOUT_S,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "LLM warmup tick for %s timed out after %.1fs; "
-                    "first intent will arrive after race start",
-                    player.player_id,
-                    _WARMUP_TIMEOUT_S,
-                )
-            except Exception:
-                # warmup_tick is built on tick_once which already swallows
-                # generator exceptions, but defend the start-agents path
-                # anyway — a misbehaving model must not block the race.
-                logger.exception(
-                    "LLM warmup tick for %s raised unexpectedly",
-                    player.player_id,
-                )
-
-        # Spawn the regular background loops.
+        # Spawn the regular background loops. Each loop fires tick_once
+        # immediately, so the first generate is scheduled here — but we
+        # don't await its completion. For fast models (1.5B–3B) the result
+        # lands during countdown; for slow models (7B+) it lands a moment
+        # after RACING starts.
         for player in llm_players:
             await player.llm_bot.start()
 

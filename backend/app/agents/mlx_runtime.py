@@ -115,3 +115,51 @@ def is_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+# Per-tick generate budget by model size. Measured on an M4 Pro 48 GB:
+# 1.5B-Q4 ~0.5s, 3B-Q4 ~1s, 7B-Q4 ~3–5s, 13B-Q4 ~10s+. The numbers below
+# leave generous headroom because the first call after model load pays
+# Metal command-buffer compilation cost, often 2–3× steady-state.
+#
+# A miss (model size we can't infer) returns ``_DEFAULT_TIMEOUT_S``, which
+# is generous enough to cover the common 1.5B–7B range. The function is
+# pure substring-matching — no MLX import, safe to call before/without
+# MLX installed.
+_DEFAULT_TIMEOUT_S = 15.0
+_TIMEOUTS_BY_SIZE_HINT = (
+    # Order matters: longest substring wins (32B before 3B, etc.).
+    ("32b", 60.0),
+    ("30b", 60.0),
+    ("14b", 30.0),
+    ("13b", 30.0),
+    ("8b", 20.0),
+    ("7b", 20.0),
+    ("3b", 10.0),
+    ("1.5b", 5.0),
+    ("1.7b", 5.0),
+    ("1b", 5.0),
+    ("0.5b", 4.0),
+)
+
+
+def estimate_timeout_for_model(model_path: Optional[str]) -> float:
+    """Heuristic per-tick generate timeout for the given MLX model path.
+
+    Used by ``add_llm_player`` to plumb a sensible ``timeout_s`` into
+    ``LLMStrategist`` without callers having to know what model they're
+    racing. Larger models need a much bigger budget than the original
+    2-second default, otherwise every tick times out before the model
+    can answer and the controller is stuck in fallback cruise (the bug
+    that motivated this function).
+
+    The match is a simple lowercased substring scan over the model path.
+    Unknown paths get ``_DEFAULT_TIMEOUT_S``.
+    """
+    if model_path is None:
+        return _DEFAULT_TIMEOUT_S
+    lower = model_path.lower()
+    for hint, timeout in _TIMEOUTS_BY_SIZE_HINT:
+        if hint in lower:
+            return timeout
+    return _DEFAULT_TIMEOUT_S

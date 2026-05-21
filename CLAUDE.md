@@ -446,22 +446,39 @@ The `Controller` (`backend/app/agents/controller.py`) consumes these:
 ### LLM cold-start warmup
 
 `engine.start_agents` (called once after `start_race` triggers
-COUNTDOWN) now warms each LLM bot up BEFORE spawning the background
-strategist task:
+COUNTDOWN) seeds each LLM bot's strategist with the start-position
+observation via `LLMBot.warmup_from_state(state)` so its first
+background tick has something to chew on. The background loop is
+then spawned via `LLMBot.start()` — its first `tick_once` fires
+immediately and serves as the warmup naturally.
 
-1. Build the start-position `BotGameState` for each LLM bot and
-   pre-feed it via `LLMBot.warmup_from_state(state)`. Without this
-   the strategist's first 1–3 ticks during countdown all see
-   `observation=None` and return `None`.
-2. Run one synchronous `LLMBot.warmup_tick()` per LLM bot. The
-   shared MLX executor serialises these so they run sequentially;
-   per-bot timeout is `engine._WARMUP_TIMEOUT_S` (2.5 s default).
-3. Spawn the regular background loops.
+We do NOT block `start_agents` on a synchronous warmup generate.
+An earlier version did, but with the shared single-worker MLX
+executor a slow 7B-Q4 generate (~3–5 s) would blow past its
+warmup timeout, leak the cancelled call into the executor queue,
+and starve every other bot behind it. Net result: NO bot drove.
 
-End result: by green light, each LLM driver has a valid Intent
-cached, so the controller starts on the LLM's plan rather than the
-30 km/h fallback cruise. This closes the historical 1–2 s gap
-between LLM cars and humans/Python bots at race start.
+For fast models (1.5B–3B) the first background generate completes
+during the 3 s countdown and the LLM hits green light at full
+intent. For slow models (7B+) the controller briefly cruises in
+the 30 km/h fallback after green light, then snaps to LLM control
+on the first successful tick.
+
+### Model-aware strategist timeout
+
+`LLMStrategist._timeout_s` defaults to **15 s** (was 2 s). The
+prior 2 s default silently broke 7B+ models because their
+generates take 3–5 s on M4-class hardware — every tick timed out
+before the model could answer, so `_latest_intent` stayed `None`
+and the controller never left fallback.
+
+`engine.add_llm_player` plumbs a model-size-aware override via
+`mlx_runtime.estimate_timeout_for_model(model_path)`. The
+heuristic substring-matches on `1.5B / 3B / 7B / 13B / 32B` etc.
+and returns 5 / 10 / 20 / 30 / 60 seconds respectively. Unknown
+model paths get 15 s. Callers can override by passing
+`strategist_kwargs={"timeout_s": ...}` explicitly.
+
 
 ### Thought bubble (visibility)
 

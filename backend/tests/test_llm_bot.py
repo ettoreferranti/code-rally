@@ -223,50 +223,58 @@ class TestLLMBotWarmup:
         await engine.stop_loop()
 
     @pytest.mark.asyncio
-    async def test_start_agents_runs_warmup_tick_producing_first_intent(self, engine):
-        """The synchronous warmup_tick must produce an Intent before
-        start_agents returns, so the controller has a valid Intent on
-        the very first RACING tick.
+    async def test_start_agents_first_background_tick_produces_intent(self, engine):
+        """start_agents no longer awaits a synchronous warmup_tick, but the
+        background loop fires its tick_once immediately on start(). With a
+        fast (in-process) generate, an Intent lands within a few ticks of
+        start_agents returning. This pins that the seeded observation +
+        spawned loop wire-up actually produces results.
         """
         engine.add_llm_player("llm_player", generate_fn=_make_constant_generate(),
                               strategist_kwargs={"tick_interval_s": 0.01})
         player = engine.state.players["llm_player"]
 
         await engine.start_agents()
+        # Yield to the event loop so the background task's first tick can
+        # run. A handful of cycles is plenty for the fake generate.
+        for _ in range(5):
+            await asyncio.sleep(0.02)
 
         intent = player.llm_bot._strategist._latest_intent
-        assert intent is not None
+        assert intent is not None, "background loop never produced an Intent"
         assert intent.target_speed_kmh == 80.0
 
         await engine.stop_loop()
 
     @pytest.mark.asyncio
-    async def test_start_agents_warmup_tolerates_slow_generate(self, engine):
-        """If a generate hangs past the warmup timeout, start_agents must
-        log and continue rather than blocking the race start.
+    async def test_start_agents_returns_promptly_with_slow_generate(self, engine):
+        """A misbehaving / slow MLX generate must NOT block start_agents.
+
+        Previously a 2.5 s warmup_tick await would serialise here. After
+        switching to fire-and-forget, start_agents returns essentially
+        immediately regardless of generate latency — the slow call runs
+        on the strategist's background task and we never wait for it.
         """
         slow_event = asyncio.Event()
 
         async def slow_generate(_prompt: str) -> str:
-            try:
-                await asyncio.wait_for(slow_event.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
-                pass
+            await slow_event.wait()
             return VALID_INTENT_JSON
 
         engine.add_llm_player("llm_player", generate_fn=slow_generate,
                               strategist_kwargs={"tick_interval_s": 0.5})
 
-        # Override the engine's warmup timeout so the test stays fast.
-        from app.core import engine as engine_module
-        original_timeout = engine_module._WARMUP_TIMEOUT_S
-        engine_module._WARMUP_TIMEOUT_S = 0.1
+        start = time.perf_counter()
         try:
-            await engine.start_agents()  # must NOT hang
+            await engine.start_agents()
         finally:
-            engine_module._WARMUP_TIMEOUT_S = original_timeout
             slow_event.set()
             await engine.stop_loop()
+        elapsed = time.perf_counter() - start
+        # Generous threshold to avoid CI flakiness — the spec is "fast",
+        # not "instant". The point is "definitely not blocking on the
+        # 10s-hanging generate".
+        assert elapsed < 1.0, f"start_agents blocked for {elapsed:.2f}s"
 
 
 # ===== Per-tick path must not block on the LLM =====
@@ -572,6 +580,51 @@ class TestEngineLLMIntegration:
         assert agent_intent["use_nitro"] is True
         assert agent_intent["target_opponent_index"] == 0
         assert agent_intent["tactic"] == "overtake"
+
+    def test_add_llm_player_applies_model_aware_timeout(self, engine, monkeypatch):
+        """add_llm_player should plumb estimate_timeout_for_model(model_path)
+        into the strategist's timeout_s, so 7B+ models don't time out
+        every tick on the old 2s default.
+        """
+        from app.agents import mlx_runtime
+
+        async def stub_generate(_prompt: str) -> str:
+            return VALID_INTENT_JSON
+
+        def fake_get(model_path=None):
+            return stub_generate
+
+        monkeypatch.setattr(mlx_runtime, "get_mlx_generate_fn", fake_get)
+
+        engine.add_llm_player(
+            "llm_player",
+            model_path="mlx-community/Qwen2.5-7B-Instruct-4bit",
+        )
+        player = engine.state.players["llm_player"]
+        # Heuristic says 20s for 7B (see estimate_timeout_for_model).
+        assert player.llm_bot._strategist._timeout_s == 20.0
+
+    def test_add_llm_player_lets_explicit_timeout_override_heuristic(self, engine, monkeypatch):
+        """A caller-supplied strategist_kwargs.timeout_s must take precedence
+        over the model-size heuristic (escape hatch for tests / advanced use).
+        """
+        from app.agents import mlx_runtime
+
+        async def stub_generate(_prompt: str) -> str:
+            return VALID_INTENT_JSON
+
+        def fake_get(model_path=None):
+            return stub_generate
+
+        monkeypatch.setattr(mlx_runtime, "get_mlx_generate_fn", fake_get)
+
+        engine.add_llm_player(
+            "llm_player",
+            model_path="mlx-community/Qwen2.5-7B-Instruct-4bit",
+            strategist_kwargs={"timeout_s": 3.0},
+        )
+        player = engine.state.players["llm_player"]
+        assert player.llm_bot._strategist._timeout_s == 3.0
 
     def test_add_llm_player_propagates_model_path_to_runtime(self, engine, monkeypatch):
         """The model_path argument routes through to get_mlx_generate_fn."""
