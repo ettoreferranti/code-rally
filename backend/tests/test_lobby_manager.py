@@ -483,6 +483,51 @@ class TestLobbyManager:
         member = manager.get_lobby(lobby.lobby_id).members[llm_player_id]
         assert member.bot_name == "MyLLM"
 
+    def test_get_lobby_by_session(self, manager):
+        """The WS layer bridges from an engine session back to its lobby
+        via this helper, so engine race-finish can propagate to the
+        lobby's RACING → FINISHED transition.
+        """
+        lobby = manager.create_lobby("Race", "host_player")
+        # Simulate the race-start dispatch (which assigns a game_session_id).
+        lobby.game_session_id = "session-abc-123"
+
+        found = manager.get_lobby_by_session("session-abc-123")
+        assert found is not None
+        assert found.lobby_id == lobby.lobby_id
+
+    def test_get_lobby_by_session_returns_none_for_unknown(self, manager):
+        assert manager.get_lobby_by_session("not-a-real-session") is None
+
+    def test_get_lobby_by_session_returns_none_when_session_cleared(self, manager):
+        """After ``reset_lobby`` clears the lobby's game_session_id, the
+        helper must no longer match that old id.
+        """
+        lobby = manager.create_lobby("Race", "host_player")
+        lobby.game_session_id = "session-old"
+        # Mimic what reset_lobby does.
+        lobby.game_session_id = None
+        assert manager.get_lobby_by_session("session-old") is None
+
+    def test_finish_race_is_idempotent(self, manager):
+        """finish_race only returns True on the first call from RACING;
+        subsequent calls (or from any non-RACING status) return False.
+        This is what we use as the de-dup gate when polling from the
+        broadcaster — the broadcaster runs every frame, but finish_race
+        only fires once per race.
+        """
+        from app.core.lobby import LobbyStatus
+
+        lobby = manager.create_lobby("Race", "host_player")
+        lobby.status = LobbyStatus.RACING
+
+        assert manager.finish_race(lobby.lobby_id) is True
+        assert lobby.status == LobbyStatus.FINISHED
+
+        # Second call must be a no-op.
+        assert manager.finish_race(lobby.lobby_id) is False
+        assert lobby.status == LobbyStatus.FINISHED
+
     def test_add_llm_bot_to_lobby(self, manager, monkeypatch):
         """LLM path of unified add_bot_to_lobby produces driver_kind='llm_bot'."""
         from app.agents import mlx_runtime

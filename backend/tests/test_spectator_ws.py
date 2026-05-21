@@ -181,3 +181,88 @@ class TestSpectatorWebSocketDisconnect:
         lobby = manager.get_lobby(lobby_id)
         assert lobby is not None
         assert lobby.get_spectator_count() == 0
+
+
+class TestSpectatorRacingLobbyGameState:
+    """Lobby spectators joining a RACING lobby must be registered for
+    the session's game-state broadcast — otherwise their frontend sits
+    on a "Waiting for game state..." screen indefinitely (the bug that
+    motivated this test class).
+    """
+
+    def test_spectator_registered_in_session_pool_for_racing_lobby(self, client):
+        """When a spectator opens the WS against a RACING lobby, the
+        backend must add their websocket to ``_spectator_connections``
+        keyed by the lobby's game_session_id. That's the only path that
+        gets them into ``broadcast_game_state``'s send loop.
+        """
+        from app.api.routes import game as game_route
+        from app.core.engine import GameEngine
+        from app.core.lobby import LobbyStatus
+        from app.core.track import TrackGenerator
+
+        lobby_id = _create_waiting_lobby(client)
+        manager = get_lobby_manager()
+        lobby = manager.get_lobby(lobby_id)
+        lobby.status = LobbyStatus.RACING
+        lobby.game_session_id = "session-spec-racing"
+
+        # The WS handler reads engine.state.track from _game_sessions to
+        # build the race_starting payload. Stand up a tiny engine for it.
+        track = TrackGenerator(seed=42).generate(difficulty="easy")
+        engine = GameEngine(track)
+        game_route._game_sessions["session-spec-racing"] = engine
+
+        try:
+            with client.websocket_connect(
+                f"/game/ws?lobby_id={lobby_id}&player_id=spec1&spectate=true"
+            ) as ws:
+                # First message: spectator_joined.
+                first = ws.receive_json()
+                assert first["type"] == "spectator_joined"
+                # Second message: race_starting with track (because lobby is RACING).
+                second = ws.receive_json()
+                assert second["type"] == "race_starting"
+
+                # The fix: the websocket must now be in the session's
+                # spectator pool so broadcast_game_state reaches it.
+                pool = game_route._spectator_connections.get("session-spec-racing")
+                assert pool is not None
+                assert len(pool) == 1
+        finally:
+            game_route._game_sessions.pop("session-spec-racing", None)
+            game_route._spectator_connections.pop("session-spec-racing", None)
+
+    def test_spectator_removed_from_session_pool_on_disconnect(self, client):
+        """Cleanup symmetry: closing the WS must drop the spectator
+        from the session's pool too, not just the lobby's spectator dict.
+        """
+        from app.api.routes import game as game_route
+        from app.core.engine import GameEngine
+        from app.core.lobby import LobbyStatus
+        from app.core.track import TrackGenerator
+
+        lobby_id = _create_waiting_lobby(client)
+        manager = get_lobby_manager()
+        lobby = manager.get_lobby(lobby_id)
+        lobby.status = LobbyStatus.RACING
+        lobby.game_session_id = "session-spec-cleanup"
+
+        track = TrackGenerator(seed=42).generate(difficulty="easy")
+        engine = GameEngine(track)
+        game_route._game_sessions["session-spec-cleanup"] = engine
+
+        try:
+            with client.websocket_connect(
+                f"/game/ws?lobby_id={lobby_id}&player_id=spec1&spectate=true"
+            ) as ws:
+                ws.receive_json()  # spectator_joined
+                ws.receive_json()  # race_starting
+
+            # After the `with` exits the WS is closed — pool should be
+            # cleaned of the websocket (or the key removed entirely).
+            pool = game_route._spectator_connections.get("session-spec-cleanup", set())
+            assert len(pool) == 0
+        finally:
+            game_route._game_sessions.pop("session-spec-cleanup", None)
+            game_route._spectator_connections.pop("session-spec-cleanup", None)

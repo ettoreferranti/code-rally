@@ -143,6 +143,91 @@ class TestHandleLeaveLobbyDuringRace:
         assert "player_b" not in manager.get_lobby(lobby.lobby_id).members
 
     @pytest.mark.asyncio
+    async def test_broadcast_game_state_propagates_finish_to_lobby(self, monkeypatch):
+        """When the engine race ends, the WS broadcaster must flip the
+        lobby's status from RACING to FINISHED and broadcast a fresh
+        lobby_state. Without this, the lobby browser shows "in race"
+        forever after the race actually ends.
+        """
+        from app.api.routes import game as game_route
+        from app.core.engine import GameEngine, RaceStatus
+        from app.core.lobby import LobbyStatus
+        from app.core.track import TrackGenerator
+
+        # Stub broadcast_to_lobby so we can capture the lobby_state msg.
+        captured = []
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            captured.append((lobby_id, message))
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        # Set up: a lobby in RACING, with a session registered in
+        # _lobby_sessions whose engine is FINISHED.
+        manager = get_lobby_manager()
+        lobby = manager.create_lobby("Race", "host_player")
+        lobby.status = LobbyStatus.RACING
+        lobby.game_session_id = "session-finish-test"
+
+        track = TrackGenerator(seed=42).generate(difficulty="easy")
+        engine = GameEngine(track)
+        engine.state.race_info.status = RaceStatus.FINISHED
+
+        # Register the session both as a known game session and as a
+        # lobby-bound session (the WS module's bookkeeping).
+        game_route._game_sessions["session-finish-test"] = engine
+        game_route._lobby_sessions.add("session-finish-test")
+        try:
+            await game_route.broadcast_game_state("session-finish-test")
+
+            # Lobby flipped to FINISHED.
+            assert lobby.status == LobbyStatus.FINISHED
+            # And a lobby_state broadcast went out exactly once.
+            lobby_state_msgs = [
+                m for (lid, m) in captured
+                if lid == lobby.lobby_id and m["type"] == "lobby_state"
+            ]
+            assert len(lobby_state_msgs) == 1
+
+            # Idempotency: a second broadcast tick after the transition
+            # must NOT re-broadcast (finish_race returns False the
+            # second time, so the gate holds).
+            captured.clear()
+            await game_route.broadcast_game_state("session-finish-test")
+            assert captured == []
+        finally:
+            game_route._game_sessions.pop("session-finish-test", None)
+            game_route._lobby_sessions.discard("session-finish-test")
+
+    @pytest.mark.asyncio
+    async def test_broadcast_game_state_skips_finish_for_non_lobby_session(self, monkeypatch):
+        """Direct-mode (non-lobby) races must not trip the lobby
+        propagation path — there's no lobby to update.
+        """
+        from app.api.routes import game as game_route
+        from app.core.engine import GameEngine, RaceStatus
+        from app.core.track import TrackGenerator
+
+        captured = []
+
+        async def fake_broadcast(lobby_id, message, exclude_player_id=None):
+            captured.append(message)
+
+        monkeypatch.setattr(game_route, "broadcast_to_lobby", fake_broadcast)
+
+        track = TrackGenerator(seed=42).generate(difficulty="easy")
+        engine = GameEngine(track)
+        engine.state.race_info.status = RaceStatus.FINISHED
+
+        game_route._game_sessions["session-direct"] = engine
+        # NOT adding to _lobby_sessions ⇒ this is a direct-mode race.
+        try:
+            await game_route.broadcast_game_state("session-direct")
+            assert captured == []  # no lobby broadcasts
+        finally:
+            game_route._game_sessions.pop("session-direct", None)
+
+    @pytest.mark.asyncio
     async def test_disconnect_with_missing_lobby_does_not_raise(self, monkeypatch):
         """Defensive: a stale lobby_id (already disbanded) must not crash
         the disconnect handler.

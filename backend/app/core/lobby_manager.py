@@ -472,6 +472,10 @@ class LobbyManager:
         """
         Transition lobby from RACING to FINISHED.
 
+        Idempotent: only the first call (while status is RACING) returns
+        ``True``. Used as the de-dup gate when the WS layer detects the
+        engine has finished and propagates the transition.
+
         Args:
             lobby_id: Lobby identifier
 
@@ -485,6 +489,20 @@ class LobbyManager:
         lobby.status = LobbyStatus.FINISHED
         logger.info(f"Lobby {lobby_id} race finished")
         return True
+
+    def get_lobby_by_session(self, session_id: str) -> Optional[Lobby]:
+        """Return the lobby whose game_session_id matches the given id.
+
+        Used by the WS layer to bridge from an engine session back to
+        the lobby that owns it — needed to propagate engine race-finish
+        to the lobby's RACING → FINISHED transition. Returns ``None``
+        when no lobby owns the session (direct-mode races, or session
+        already cleared via ``reset_lobby``).
+        """
+        for lobby in self._lobbies.values():
+            if lobby.game_session_id == session_id:
+                return lobby
+        return None
 
     def reset_lobby(self, lobby_id: str, player_id: str) -> bool:
         """

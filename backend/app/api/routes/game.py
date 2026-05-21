@@ -252,6 +252,26 @@ async def broadcast_game_state(session_id: str) -> None:
             if not _spectator_connections[session_id]:
                 del _spectator_connections[session_id]
 
+    # When the engine race ends, propagate the FINISHED status back to
+    # the lobby that owns this session. Without this, lobbies stay
+    # listed as "in race" forever in the lobby browser (the engine
+    # state would say FINISHED, but the lobby state — used by the
+    # browser — wouldn't). finish_race is idempotent (returns False
+    # after the first transition), so this runs at most once per race.
+    if (
+        session_id in _lobby_sessions
+        and engine.state.race_info.status == RaceStatus.FINISHED
+    ):
+        lobby_manager = get_lobby_manager()
+        lobby = lobby_manager.get_lobby_by_session(session_id)
+        if lobby is not None and lobby_manager.finish_race(lobby.lobby_id):
+            # Transition just fired — refresh the lobby browser + any
+            # connected lobby-mode UIs (spectators, post-race screens).
+            await broadcast_to_lobby(lobby.lobby_id, {
+                'type': 'lobby_state',
+                'data': serialize_lobby_state(lobby)
+            })
+
 
 async def state_broadcaster(session_id: str, update_rate: int = 60) -> None:
     """
@@ -629,6 +649,22 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
         }
     })
 
+    # Any spectators that were already in the lobby (status=WAITING ⇒
+    # status=RACING transition just happened) need to start receiving
+    # game-state broadcasts. Their websockets live in
+    # ``manager.active_connections[lobby_id]``; we look up each one
+    # via the player_id → WS map and register it for the session's
+    # spectator pool. (Spectators joining AFTER the race already
+    # started are handled in the lobby-spectate WS branch.)
+    if lobby.spectators:
+        for spectator_player_id in list(lobby.spectators.keys()):
+            ws = manager.player_to_ws.get(spectator_player_id)
+            if ws is None:
+                continue  # spectator's WS already closed
+            if game_session_id not in _spectator_connections:
+                _spectator_connections[game_session_id] = set()
+            _spectator_connections[game_session_id].add(ws)
+
 
 async def handle_add_bot_to_lobby(lobby_id: str, player_id: str, bot_id: int, websocket: WebSocket) -> None:
     """
@@ -887,6 +923,17 @@ async def game_websocket(
                             }
                         }
                     })
+                    # Register this websocket for the game-state broadcast.
+                    # Without this, ``broadcast_game_state`` only ships to
+                    # ``manager.active_connections[session_id]`` and the
+                    # session's spectator pool — neither of which contains
+                    # a lobby-mode spectator, whose WS lives in
+                    # ``active_connections[lobby_id]``. Result before the
+                    # fix: the spectator sat on a "Waiting for game
+                    # state..." screen indefinitely.
+                    if game_sid not in _spectator_connections:
+                        _spectator_connections[game_sid] = set()
+                    _spectator_connections[game_sid].add(websocket)
         else:
             # Regular player mode - join lobby as member
             await handle_join_lobby(lobby_id, player_id, player_id, websocket)
@@ -1158,6 +1205,16 @@ async def game_websocket(
             if is_lobby_mode:
                 manager.disconnect(websocket, lobby_id)
                 await handle_leave_spectate(lobby_id, player_id)
+                # If we registered this lobby-spectator's WS for the
+                # session's game-state broadcast (RACING lobby), drop
+                # it from there too — otherwise the next broadcast
+                # would try to send to a closed socket.
+                lobby_for_session = get_lobby_manager().get_lobby(lobby_id)
+                game_sid = lobby_for_session.game_session_id if lobby_for_session else None
+                if game_sid and game_sid in _spectator_connections:
+                    _spectator_connections[game_sid].discard(websocket)
+                    if not _spectator_connections[game_sid]:
+                        del _spectator_connections[game_sid]
             else:
                 # Direct spectate - remove from spectator connections
                 if session_id in _spectator_connections:
