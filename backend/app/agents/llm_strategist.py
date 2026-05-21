@@ -290,6 +290,16 @@ def _parse_intent(raw: str) -> Optional[Intent]:
     except json.JSONDecodeError:
         return None
 
+    # Clamp out-of-range numeric values BEFORE validation. Observed: small
+    # MLX models (Qwen 1.5B/3B Q4) routinely emit values well outside the
+    # documented ranges — e.g. ``racing_line_offset_m: -130`` when the
+    # protocol says "-10 to 10". Rejecting these as ValidationError drops
+    # the entire intent and forces the controller into fallback cruise
+    # for that tick. Clamping preserves the LLM's directional preference
+    # (still max-left) inside the schema budget so the strategist keeps
+    # producing usable intents.
+    _clamp_numeric_fields(data)
+
     try:
         intent = Intent.model_validate(data)
     except ValidationError:
@@ -302,3 +312,38 @@ def _parse_intent(raw: str) -> Optional[Intent]:
         return None
 
     return intent
+
+
+# Fields with documented numeric ranges that the LLM frequently overshoots.
+# Kept in lock-step with the ``Intent`` pydantic model's Field bounds — if
+# the schema bounds change, update these too.
+_INTENT_NUMERIC_BOUNDS = {
+    "target_speed_kmh": (0.0, 400.0),
+    "racing_line_offset_m": (-20.0, 20.0),
+    "aggression": (0.0, 1.0),
+}
+
+
+def _clamp_numeric_fields(data: dict) -> None:
+    """In-place clamp out-of-range numeric Intent fields to schema bounds.
+
+    Only adjusts numeric values that are present and outside the bounds —
+    leaves booleans, strings, missing keys, and in-range values untouched
+    (so they go through normal pydantic validation as before).
+    Logs INFO when a clamp fires so the LLM's misbehaviour stays visible.
+    """
+    for key, (lo, hi) in _INTENT_NUMERIC_BOUNDS.items():
+        if key not in data:
+            continue
+        val = data[key]
+        # bool is a subclass of int in Python — exclude it explicitly so
+        # ``True``/``False`` aren't accidentally treated as 1/0 numerics.
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            continue
+        if val < lo or val > hi:
+            clamped = lo if val < lo else hi
+            logger.info(
+                "intent field %s out of range (got %s, clamped to %s)",
+                key, val, clamped,
+            )
+            data[key] = clamped

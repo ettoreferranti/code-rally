@@ -147,9 +147,15 @@ class TestParseIntent:
     def test_returns_none_on_missing_field(self):
         assert _parse_intent('{"target_speed_kmh": 80}') is None
 
-    def test_returns_none_on_out_of_range(self):
+    def test_out_of_range_is_clamped_not_dropped(self):
+        # Updated from the old "drops on out-of-range" assertion. Small
+        # MLX models routinely overshoot the documented bounds; we now
+        # clamp into the schema range instead of dropping the entire
+        # intent so the controller doesn't get starved into fallback.
         raw = '{"target_speed_kmh": 80, "racing_line_offset_m": 0, "aggression": 5}'
-        assert _parse_intent(raw) is None
+        intent = _parse_intent(raw)
+        assert intent is not None
+        assert intent.aggression == 1.0
 
     def test_parses_first_object_when_model_concatenates_outputs(self):
         """Observed from Qwen2.5-1.5B during #162 diagnosis: the model
@@ -166,6 +172,79 @@ class TestParseIntent:
         assert intent.target_speed_kmh == 44
         assert intent.racing_line_offset_m == 0
         assert intent.aggression == 0.5
+
+    def test_clamps_offset_below_lower_bound(self):
+        # Real-world observed output: small Qwen models emit values like
+        # racing_line_offset_m=-52 or -130 despite the prompt saying
+        # "-10 to 10". Pre-clamp keeps the intent usable instead of
+        # silently dropping it.
+        raw = (
+            '{"target_speed_kmh": 113, "racing_line_offset_m": -130, '
+            '"aggression": 0.9, "target_opponent_index": 0, "tactic": "race"}'
+        )
+        intent = _parse_intent(raw)
+        assert intent is not None
+        # Schema lower bound is -20.0 (see Intent.racing_line_offset_m).
+        assert intent.racing_line_offset_m == -20.0
+        # Other fields untouched.
+        assert intent.target_speed_kmh == 113
+        assert intent.aggression == 0.9
+
+    def test_clamps_offset_above_upper_bound(self):
+        raw = (
+            '{"target_speed_kmh": 169, "racing_line_offset_m": 88, '
+            '"aggression": 0.9}'
+        )
+        intent = _parse_intent(raw)
+        assert intent is not None
+        assert intent.racing_line_offset_m == 20.0
+
+    def test_clamps_target_speed_above_bound(self):
+        # 1000 km/h is silly; clamp to schema max (400).
+        raw = '{"target_speed_kmh": 1000, "racing_line_offset_m": 0, "aggression": 0.5}'
+        intent = _parse_intent(raw)
+        assert intent is not None
+        assert intent.target_speed_kmh == 400.0
+
+    def test_clamps_aggression_above_bound(self):
+        raw = '{"target_speed_kmh": 100, "racing_line_offset_m": 0, "aggression": 1.7}'
+        intent = _parse_intent(raw)
+        assert intent is not None
+        assert intent.aggression == 1.0
+
+    def test_clamps_negative_aggression_to_zero(self):
+        raw = '{"target_speed_kmh": 100, "racing_line_offset_m": 0, "aggression": -0.3}'
+        intent = _parse_intent(raw)
+        assert intent is not None
+        assert intent.aggression == 0.0
+
+    def test_in_range_values_are_not_modified(self):
+        raw = '{"target_speed_kmh": 120, "racing_line_offset_m": -7.5, "aggression": 0.6}'
+        intent = _parse_intent(raw)
+        assert intent is not None
+        # No clamping fired ⇒ values exactly as supplied.
+        assert intent.target_speed_kmh == 120
+        assert intent.racing_line_offset_m == -7.5
+        assert intent.aggression == 0.6
+
+    def test_clamping_still_drops_intent_below_min_target(self):
+        # The min-target floor runs AFTER clamping. A target of 5 km/h is
+        # in [0, 400] schema bounds, but below the strategist's safety
+        # floor — keep the old "drop and hold last good intent" behaviour
+        # so the car never converges to a near-stop.
+        raw = '{"target_speed_kmh": 5, "racing_line_offset_m": 0, "aggression": 0.5}'
+        assert _parse_intent(raw) is None
+
+    def test_clamp_does_not_choke_on_non_numeric_values(self):
+        # Defensive: if the model emits a string for a numeric field, the
+        # pre-clamp must leave it alone (it isn't numeric → no clamp).
+        # Pydantic's coercion may still accept it; in that case fine,
+        # we just want the clamp to not crash on the unexpected type.
+        raw = '{"target_speed_kmh": "150", "racing_line_offset_m": 0, "aggression": 0.5}'
+        intent = _parse_intent(raw)
+        # Pydantic coerces "150" → 150 ⇒ we expect a parsed intent here.
+        assert intent is not None
+        assert intent.target_speed_kmh == 150
 
     def test_parses_first_object_with_trailing_prose(self):
         raw = (
