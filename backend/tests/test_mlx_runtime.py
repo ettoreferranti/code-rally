@@ -263,3 +263,85 @@ class TestEstimateTimeoutForModel:
             mlx_runtime.estimate_timeout_for_model("mlx-community/qwen2.5-7b-q4")
             == 20.0
         )
+
+
+# ===== Model-label formatter =====
+
+
+class TestFormatLLMModelLabel:
+    """Short, human-readable model labels for the race UI. The goal is
+    to let a user with multiple LLM bots in the same race tell at a
+    glance which car is which (Qwen 7B vs Qwen 1.5B vs Llama 8B etc.).
+    """
+
+    def test_none_returns_generic_llm(self):
+        assert mlx_runtime.format_llm_model_label(None) == "LLM"
+
+    def test_empty_string_returns_generic_llm(self):
+        assert mlx_runtime.format_llm_model_label("") == "LLM"
+
+    def test_qwen_with_size(self):
+        assert (
+            mlx_runtime.format_llm_model_label(
+                "mlx-community/Qwen2.5-7B-Instruct-4bit"
+            )
+            == "Qwen 7B"
+        )
+
+    def test_qwen_with_decimal_size(self):
+        assert (
+            mlx_runtime.format_llm_model_label(
+                "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
+            )
+            == "Qwen 1.5B"
+        )
+
+    def test_llama_with_size(self):
+        assert (
+            mlx_runtime.format_llm_model_label(
+                "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+            )
+            == "Llama 8B"
+        )
+
+    def test_phi_without_explicit_size_falls_back_to_family(self):
+        # Phi-3.5-mini doesn't carry an "NB" token; family alone is fine.
+        assert (
+            mlx_runtime.format_llm_model_label(
+                "mlx-community/Phi-3.5-mini-instruct-4bit"
+            )
+            == "Phi"
+        )
+
+    def test_unknown_path_uses_basename(self):
+        assert (
+            mlx_runtime.format_llm_model_label("custom/some-research-model")
+            == "some-research-model"
+        )
+
+    def test_size_without_family_returns_size_only(self):
+        assert mlx_runtime.format_llm_model_label("acme/SuperBrain-13B-4bit") == "13B"
+
+    def test_strips_path_prefix(self):
+        # Long HuggingFace-style path: take the basename.
+        assert (
+            mlx_runtime.format_llm_model_label(
+                "mlx-community/some-org/Qwen2.5-3B-Instruct-4bit"
+            )
+            == "Qwen 3B"
+        )
+
+    def test_case_insensitive_family_match(self):
+        assert (
+            mlx_runtime.format_llm_model_label("mlx-community/qwen2.5-7b-q4")
+            == "Qwen 7B"
+        )
+
+    def test_does_not_confuse_version_with_size(self):
+        # Qwen2.5 contains "2.5" but it's a version, not a size. Regex
+        # uses \b after B to require the suffix; the version number has
+        # no trailing B so it's ignored.
+        assert (
+            mlx_runtime.format_llm_model_label("mlx-community/Qwen2.5-7B-Instruct")
+            == "Qwen 7B"
+        )

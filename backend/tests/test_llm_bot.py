@@ -560,6 +560,59 @@ class TestEngineLLMIntegration:
         assert agent_intent["target_opponent_index"] is None
         assert agent_intent["tactic"] == "race"
 
+    def test_snapshot_exposes_bot_name_and_model_label(self, engine):
+        """LLM cars must surface the actual Tinker bot name + a short
+        model label so the race UI can tell apart multiple LLM bots in
+        the same race. Without these the snapshot used to ship a cryptic
+        numeric suffix from player_id and nothing about the model.
+        """
+        engine.add_llm_player(
+            "llm-quaerenv-3",
+            generate_fn=_make_constant_generate(),
+            model_path="mlx-community/Qwen2.5-7B-Instruct-4bit",
+            bot_name="Speed Demon",
+        )
+
+        snap = engine.get_state_snapshot()["players"]["llm-quaerenv-3"]
+        assert snap["bot_name"] == "Speed Demon"
+        assert snap["llm_model_label"] == "Qwen 7B"
+
+    def test_snapshot_bot_name_falls_back_when_not_supplied(self, engine):
+        """Defensive: callers that didn't set bot_name still get the old
+        player_id-parsing behaviour (so legacy code doesn't crash).
+        """
+        engine.add_llm_player(
+            "llm-foo-42",
+            generate_fn=_make_constant_generate(),
+        )
+        # bot_name wasn't set ⇒ snapshot falls back to player_id.split("-")[2].
+        snap = engine.get_state_snapshot()["players"]["llm-foo-42"]
+        assert snap["bot_name"] == "42"
+        # Default model path is used ⇒ label reflects the default.
+        assert snap["llm_model_label"]  # truthy (some non-empty label)
+
+    def test_snapshot_python_bot_bot_name_propagates(self, engine):
+        """Same plumbing must work for Python bots (so the race UI
+        shows their Tinker name too).
+        """
+        from app.bot_runtime.templates import get_template_code  # type: ignore
+
+        try:
+            code = get_template_code("aggressive_bot")
+        except Exception:
+            pytest.skip("aggressive_bot template not available")
+
+        engine.add_bot_player(
+            "bot-quaerenv-7",
+            bot_code=code,
+            bot_class_name="AggressiveBot",
+            bot_name="Aggro 7",
+        )
+        snap = engine.get_state_snapshot()["players"]["bot-quaerenv-7"]
+        assert snap["bot_name"] == "Aggro 7"
+        # Python bots don't carry a model label.
+        assert snap["llm_model_label"] is None
+
     def test_snapshot_exposes_tactical_intent_fields(self, engine):
         """When the LLM emits the new tactical fields, the snapshot ships them all."""
         import time as _time

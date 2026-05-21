@@ -547,6 +547,7 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
                     member.player_id,
                     model_path=member.llm_model_path,
                     strategist_kwargs=strategist_kwargs or None,
+                    bot_name=member.bot_name,
                 )
             except BotError as e:
                 logger.error(f"Failed to add LLM bot {member.player_id} to race: {e}")
@@ -559,7 +560,8 @@ async def handle_lobby_start_race(lobby_id: str, player_id: str, websocket: WebS
                 engine.add_bot_player(
                     member.player_id,
                     member.bot_code,
-                    member.bot_class_name
+                    member.bot_class_name,
+                    bot_name=member.bot_name,
                 )
             except BotError as e:
                 logger.error(f"Failed to add bot {member.player_id} to race: {e}")

@@ -407,7 +407,10 @@ export function renderCar(
     }
   }
 
-  // Render bot name label if this is a bot
+  // Render bot name label if this is a bot. LLM-driven cars get a
+  // smaller second line below the name showing the model (e.g.
+  // "Qwen 7B") so the user can tell apart multiple LLM bots in the
+  // same race without leaving the race screen.
   if (car.botName) {
     // Reset rotation for label (we want text to be upright)
     ctx.rotate(-car.heading);
@@ -417,6 +420,12 @@ export function renderCar(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText(car.botName, 0, -20);
+
+    if (car.llmModelLabel) {
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.85)'; // yellow-ish to echo bubble style
+      ctx.font = '8px monospace';
+      ctx.fillText(car.llmModelLabel, 0, -10);
+    }
   }
 
   ctx.restore();

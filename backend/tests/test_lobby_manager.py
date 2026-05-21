@@ -462,6 +462,27 @@ class TestLobbyManager:
         assert member.driver_kind == "python_bot"
         assert member.is_bot is True
 
+    def test_add_bot_to_lobby_stores_bot_name_for_python(self, manager):
+        """bot_name from the Tinker library row must be denormalised onto
+        the LobbyMember so the race-start dispatcher can plumb it through
+        to the engine (and on to the race UI).
+        """
+        lobby = manager.create_lobby("Test Lobby", "player1")
+        bot_player_id = self._add_python_bot(
+            manager, lobby.lobby_id, name="Speed Demon"
+        )
+        member = manager.get_lobby(lobby.lobby_id).members[bot_player_id]
+        assert member.bot_name == "Speed Demon"
+
+    def test_add_bot_to_lobby_stores_bot_name_for_llm(self, manager, monkeypatch):
+        from app.agents import mlx_runtime
+        monkeypatch.setattr(mlx_runtime, "is_available", lambda: True)
+
+        lobby = manager.create_lobby("Test Lobby", "player1")
+        llm_player_id = self._add_llm_bot(manager, lobby.lobby_id, name="MyLLM")
+        member = manager.get_lobby(lobby.lobby_id).members[llm_player_id]
+        assert member.bot_name == "MyLLM"
+
     def test_add_llm_bot_to_lobby(self, manager, monkeypatch):
         """LLM path of unified add_bot_to_lobby produces driver_kind='llm_bot'."""
         from app.agents import mlx_runtime

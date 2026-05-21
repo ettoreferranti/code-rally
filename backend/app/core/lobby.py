@@ -49,6 +49,7 @@ class LobbyMember:
     driver_kind: str = "human"  # "human" | "python_bot" | "llm_bot"
     is_bot: bool = False
     bot_id: Optional[int] = None  # Database bot ID (both python_bot and llm_bot)
+    bot_name: Optional[str] = None  # Tinker display name (both bot kinds)
     bot_code: Optional[str] = None  # python_bot only
     bot_class_name: Optional[str] = None  # python_bot only
     llm_model_path: Optional[str] = None  # llm_bot only

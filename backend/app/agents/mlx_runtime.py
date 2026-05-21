@@ -15,6 +15,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import re
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -163,3 +164,60 @@ def estimate_timeout_for_model(model_path: Optional[str]) -> float:
         if hint in lower:
             return timeout
     return _DEFAULT_TIMEOUT_S
+
+
+# Known model-family substrings (case-insensitive). The first family
+# match becomes the display prefix in ``format_llm_model_label``. Order
+# doesn't matter — we take the first hit, which is fine because the
+# substrings are disjoint in practice.
+_MODEL_FAMILIES = (
+    ("qwen", "Qwen"),
+    ("llama", "Llama"),
+    ("phi", "Phi"),
+    ("mistral", "Mistral"),
+    ("mixtral", "Mixtral"),
+    ("gemma", "Gemma"),
+    ("deepseek", "DeepSeek"),
+    ("yi", "Yi"),
+)
+
+_SIZE_RE = re.compile(r"(?<![0-9.])(\d+(?:\.\d+)?)\s*b\b", re.IGNORECASE)
+
+
+def format_llm_model_label(model_path: Optional[str]) -> str:
+    """Return a short, human-readable label for an MLX model path.
+
+    Examples:
+        ``mlx-community/Qwen2.5-7B-Instruct-4bit`` → ``"Qwen 7B"``
+        ``mlx-community/Meta-Llama-3.1-8B-Instruct-4bit`` → ``"Llama 8B"``
+        ``mlx-community/Phi-3.5-mini-instruct-4bit`` → ``"Phi"``
+        ``custom/some-model-path`` → ``"some-model-path"``
+        ``None`` / ``""`` → ``"LLM"``
+
+    Used to label LLM-driven cars in the race UI so the user can tell
+    apart a Qwen-7B bot from a Qwen-1.5B bot without leaving the race
+    screen. Pure function: no MLX import, no IO.
+    """
+    if not model_path:
+        return "LLM"
+
+    # Basename, in case the user pasted a long HuggingFace path.
+    basename = model_path.rstrip("/").split("/")[-1]
+    lower = basename.lower()
+
+    family: Optional[str] = None
+    for hint, display in _MODEL_FAMILIES:
+        if hint in lower:
+            family = display
+            break
+
+    size_match = _SIZE_RE.search(basename)
+    size = f"{size_match.group(1)}B" if size_match else None
+
+    if family and size:
+        return f"{family} {size}"
+    if family:
+        return family
+    if size:
+        return size
+    return basename

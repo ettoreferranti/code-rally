@@ -45,6 +45,10 @@ export interface GameStateMessage {
         dnf: boolean;  // Did Not Finish
         is_bot: boolean;  // Whether this player is a bot
         bot_name: string | null;  // Bot name if is_bot is true
+        // Short model label for LLM cars (e.g. "Qwen 7B"). Present only
+        // for LLM bots. Optional for backward compatibility with older
+        // backends.
+        llm_model_label?: string | null;
         bot_error: string | null;  // Bot error message if any
         // Present only for LLM-driven cars that have produced an intent.
         agent_intent?: {

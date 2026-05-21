@@ -492,6 +492,23 @@ from the backend. To avoid spurious member removal + host transfer
 re-enters the lobby cleanly when the race ends.
 
 
+### Bot names and model labels in the race UI
+
+Each `PlayerState` carries a `bot_name` (the Tinker display name, e.g.
+"Speed Demon") and — for LLM bots — a precomputed `llm_model_label`
+("Qwen 7B", "Llama 8B", etc., via
+`mlx_runtime.format_llm_model_label`). Both ride on
+`_player_snapshot`. The lobby's `LobbyMember.bot_name` is the source
+of truth; `handle_lobby_start_race` plumbs it (plus `llm_model_path`)
+into `add_bot_player` / `add_llm_player`.
+
+Frontend renders the model label as a small second line below the
+bot name on the canvas, and as a small badge next to the player
+name in the post-race results table. Lets the user tell apart
+multiple LLM bots from the same owner that often share the same
+display name. Without this, the snapshot used to ship the cryptic
+numeric suffix of the auto-generated `llm-username-N` player_id.
+
 ### Thought bubble (visibility)
 
 `engine._player_snapshot` ships all six Intent fields under

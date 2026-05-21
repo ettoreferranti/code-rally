@@ -138,6 +138,22 @@ export const RaceResultsScreen: React.FC<RaceResultsScreenProps> = ({
                     >
                       {isCurrentPlayer ? 'You' : result.playerName || result.playerId.substring(0, 8)}
                       {isCurrentPlayer && ' ★'}
+                      {result.llmModelLabel && (
+                        <span
+                          data-testid="result-model-label"
+                          style={{
+                            marginLeft: '8px',
+                            padding: '2px 6px',
+                            backgroundColor: 'rgba(255, 215, 0, 0.15)',
+                            color: '#FFD700',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 'normal',
+                          }}
+                        >
+                          {result.llmModelLabel}
+                        </span>
+                      )}
                     </td>
                     <td
                       style={{

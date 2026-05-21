@@ -93,6 +93,10 @@ export interface CarState {
   playerId?: string;  // Player/bot ID
   isBot?: boolean;  // Whether this is a bot-controlled car
   botName?: string | null;  // Bot name if this is a bot
+  // Short model label for LLM-driven cars (e.g. "Qwen 7B", "Llama 8B").
+  // Computed server-side via mlx_runtime.format_llm_model_label.
+  // Undefined for humans and Python bots.
+  llmModelLabel?: string | null;
   // Latest strategist intent for LLM-driven cars. Absent for humans and
   // Python bots; absent for LLM cars until their first intent is produced.
   agentIntent?: AgentIntent;
@@ -118,6 +122,10 @@ export interface RaceInfo {
 export interface PlayerResult {
   playerId: string;
   playerName?: string;
+  // Short model label for LLM-driven cars (e.g. "Qwen 7B"). Used in the
+  // results table to disambiguate cars that share a player name (e.g.
+  // three LLM bots from the same owner).
+  llmModelLabel?: string | null;
   position: number | null;  // Final position (1st, 2nd, 3rd, etc.) - null for DNF
   finishTime: number | null;  // Total stage time in seconds
   points: number;  // Points awarded based on position

@@ -77,6 +77,17 @@ class PlayerState:
     bot_code: Optional[str] = None  # Bot source code for persistence
     bot_class_name: Optional[str] = None  # Bot class name
     bot_error: Optional[str] = None  # Error message if bot failed
+    # Display name for the bot (the Tinker library name, e.g. "Speed
+    # Demon"). When None, the engine's ``_player_snapshot`` falls back to
+    # parsing player_id, which yields cryptic numeric suffixes for
+    # auto-generated ids like "llm-username-3" → "3". Set this from the
+    # lobby's LobbyMember.bot_name so the race UI shows the real name.
+    bot_name: Optional[str] = None
+    # Short model label for LLM-driven cars (e.g. "Qwen 7B", "Llama 8B").
+    # Computed via ``mlx_runtime.format_llm_model_label`` at add-time.
+    # Surfaces in the WS payload + bubble + car canvas label so the user
+    # can tell apart multiple LLM bots in the same race.
+    llm_model_label: Optional[str] = None
     # LLM driver: when set, this player is driven by an LLM strategist +
     # deterministic controller instead of (or alongside, mutually exclusive
     # with) the Python sandbox bot. The engine dispatches the LLM path in
@@ -166,7 +177,13 @@ class GameEngine:
         if player_id in self.state.players:
             del self.state.players[player_id]
 
-    def add_bot_player(self, player_id: str, bot_code: str, bot_class_name: str) -> PlayerState:
+    def add_bot_player(
+        self,
+        player_id: str,
+        bot_code: str,
+        bot_class_name: str,
+        bot_name: Optional[str] = None,
+    ) -> PlayerState:
         """
         Add a bot-controlled player to the game.
 
@@ -174,6 +191,9 @@ class GameEngine:
             player_id: Unique identifier for the player
             bot_code: Python source code for the bot
             bot_class_name: Name of the bot class to instantiate
+            bot_name: Display name shown on the canvas / leaderboard
+                (the Tinker library name). When omitted the snapshot
+                falls back to parsing the player_id.
 
         Returns:
             The created PlayerState
@@ -183,6 +203,7 @@ class GameEngine:
         """
         # Create player first
         player = self.add_player(player_id)
+        player.bot_name = bot_name
 
         # Load bot
         try:
@@ -209,6 +230,7 @@ class GameEngine:
         generate_fn: Optional[GenerateFn] = None,
         strategist_kwargs: Optional[Dict[str, Any]] = None,
         model_path: Optional[str] = None,
+        bot_name: Optional[str] = None,
     ) -> PlayerState:
         """
         Add an LLM-controlled player to the game.
@@ -223,6 +245,9 @@ class GameEngine:
             model_path: Optional HuggingFace path / local path for the MLX
                 model. Defaults to mlx_runtime.DEFAULT_MODEL_PATH. Ignored
                 when generate_fn is provided.
+            bot_name: Display name shown on the canvas / leaderboard
+                (the Tinker library name). When omitted the snapshot
+                falls back to parsing the player_id.
 
         Returns:
             The created PlayerState
@@ -233,6 +258,7 @@ class GameEngine:
                 fails to load.
         """
         player = self.add_player(player_id)
+        player.bot_name = bot_name
 
         if generate_fn is None:
             try:
@@ -259,6 +285,12 @@ class GameEngine:
                 ) from exc
 
         player.is_bot = True
+        # Compute the short model label here so the snapshot can ship it
+        # without re-importing mlx_runtime on every tick. Done even when
+        # the caller injected a generate_fn (tests) — model_path may
+        # still be set to identify the model in the UI.
+        from app.agents import mlx_runtime as _mlx_runtime
+        player.llm_model_label = _mlx_runtime.format_llm_model_label(model_path)
         player.llm_bot = LLMBot(
             generate_fn=generate_fn,
             strategist_kwargs=strategist_kwargs,
@@ -1220,7 +1252,18 @@ class GameEngine:
             'points': player.points,
             'dnf': player.dnf,
             'is_bot': player.is_bot,
-            'bot_name': player_id.split('-')[2] if player.is_bot and '-' in player_id else None,
+            # Prefer the explicit bot_name passed at add-time (the Tinker
+            # display name). Fall back to parsing the last hyphen-segment
+            # of player_id for legacy callers that didn't supply one;
+            # that yields cryptic numeric suffixes like "3" for
+            # auto-generated "llm-username-3" ids, so all new code paths
+            # should set bot_name.
+            'bot_name': (
+                player.bot_name
+                if player.bot_name is not None
+                else (player_id.split('-')[2] if player.is_bot and '-' in player_id else None)
+            ),
+            'llm_model_label': player.llm_model_label,
             'bot_error': player.bot_error,
         }
 

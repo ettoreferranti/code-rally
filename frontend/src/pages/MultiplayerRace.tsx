@@ -136,6 +136,7 @@ export default function MultiplayerRace() {
             playerId: pid,
             isBot: pData.is_bot,
             botName: pData.bot_name,
+            llmModelLabel: pData.llm_model_label,
             agentIntent: pData.agent_intent,
           })),
           tick: state.tick,
@@ -172,6 +173,12 @@ export default function MultiplayerRace() {
           const startTime = state.race_info.start_time;
           const results: PlayerResult[] = Object.entries(state.players).map(([pid, player]) => ({
             playerId: pid,
+            // Surface the bot name (Tinker library name) so the results
+            // table doesn't show cryptic "abc12345" hashes for bots.
+            playerName: player.bot_name ?? undefined,
+            // Plus the model label, so identical bot names with different
+            // models stay distinguishable in the standings.
+            llmModelLabel: player.llm_model_label ?? undefined,
             position: player.position,
             // Calculate race duration: finish_time - start_time (both are absolute timestamps)
             finishTime: player.finish_time && startTime ? player.finish_time - startTime : null,
